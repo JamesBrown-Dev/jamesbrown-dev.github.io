@@ -2,6 +2,8 @@
 
 A modern, responsive portfolio website built from scratch to showcase full-stack development skills.
 
+ portfolio live at: **https://jamesbrown-dev.github.io**
+
 ## 🚀 Quick Start
 
 ### Customizing Your Portfolio
@@ -49,18 +51,6 @@ Before uploading to GitHub, personalize these sections:
 4. Add a commit message like "Initial portfolio website"
 
 5. Click "Commit changes"
-
-### Step 2: Enable GitHub Pages
-
-1. Go to your repository Settings
-2. Click on "Pages" in the left sidebar
-3. Under "Source", select "main" branch
-4. Click "Save"
-5. Wait 1-2 minutes for deployment
-
-### Step 3: Visit Your Live Site
-
-Your portfolio will be live at: **https://jamesbrown-dev.github.io**
 
 ## 🛠️ Technologies Used
 
