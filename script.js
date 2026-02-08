@@ -41,7 +41,7 @@ window.addEventListener('scroll', () => {
     
     // Add shadow on scroll
     if (currentScroll > 50) {
-        nav.style.boxShadow = '0 2px 20px rgba(0, 0, 0, 0.5)';
+        nav.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
     } else {
         nav.style.boxShadow = 'none';
     }

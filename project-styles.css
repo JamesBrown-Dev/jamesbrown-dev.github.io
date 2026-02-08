@@ -34,10 +34,10 @@
 .project-category {
     display: inline-block;
     padding: 0.5rem 1.25rem;
-    background: var(--color-bg-tertiary);
-    border: 1px solid var(--color-accent);
+    background: var(--color-accent);
+    border: 1px solid var(--color-accent-dark);
     border-radius: 50px;
-    color: var(--color-accent);
+    color: white;
     font-size: 0.85rem;
     font-weight: 600;
     letter-spacing: 0.1em;

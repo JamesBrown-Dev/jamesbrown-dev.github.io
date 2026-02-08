@@ -2,18 +2,24 @@
    CSS Variables & Root Styles
    ========================================== */
 :root {
-    /* Color Palette - Professional Blue & Slate */
-    --color-bg: #0f1419;
-    --color-bg-secondary: #1a1f2e;
-    --color-bg-tertiary: #252d3d;
-    --color-text: #e6edf3;
-    --color-text-secondary: #8b949e;
-    --color-text-muted: #6e7681;
+    /* Color Palette - Light Professional (Claude-inspired) */
+    --color-bg: #f8f6f3;
+    --color-bg-secondary: #ffffff;
+    --color-bg-tertiary: #f0ede8;
+    --color-text: #1a1a1a;
+    --color-text-secondary: #5a5a5a;
+    --color-text-muted: #8a8a8a;
     --color-accent: #3b82f6;
     --color-accent-dark: #2563eb;
-    --color-accent-glow: rgba(59, 130, 246, 0.15);
-    --color-border: #30363d;
-    --color-card: #161b22;
+    --color-accent-light: #60a5fa;
+    --color-accent-glow: rgba(59, 130, 246, 0.1);
+    --color-cream: #f5f1e8;
+    --color-cream-dark: #e8dfd0;
+    --color-border: #e0dcd5;
+    --color-card: #ffffff;
+    --color-shadow: rgba(0, 0, 0, 0.08);
+    --color-shadow-md: rgba(0, 0, 0, 0.12);
+    --color-shadow-lg: rgba(0, 0, 0, 0.16);
     
     /* Typography */
     --font-primary: 'Archivo', -apple-system, system-ui, sans-serif;
@@ -27,9 +33,9 @@
     --spacing-xl: 6rem;
     
     /* Effects */
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+    --shadow-sm: 0 1px 3px var(--color-shadow);
+    --shadow-md: 0 4px 12px var(--color-shadow-md);
+    --shadow-lg: 0 8px 24px var(--color-shadow-lg);
     --glow: 0 0 20px var(--color-accent-glow);
     
     /* Transitions */
@@ -68,7 +74,7 @@ body {
     width: 100%;
     height: 100%;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-    opacity: 0.03;
+    opacity: 0.015;
     pointer-events: none;
     z-index: 9999;
 }
@@ -80,7 +86,7 @@ body {
     position: fixed;
     top: 0;
     width: 100%;
-    background: rgba(10, 10, 10, 0.8);
+    background: rgba(248, 246, 243, 0.95);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--color-border);
     z-index: 1000;
@@ -110,14 +116,14 @@ body {
 .nav-logo {
     font-size: 1.5rem;
     font-weight: 700;
-    color: var(--color-accent);
+    color: var(--color-text);
     text-decoration: none;
     font-family: var(--font-mono);
     transition: var(--transition-fast);
 }
 
 .nav-logo:hover {
-    text-shadow: var(--glow);
+    color: var(--color-accent);
 }
 
 .nav-menu {
@@ -208,10 +214,10 @@ body {
 .hero-badge {
     display: inline-block;
     padding: 0.5rem 1.25rem;
-    background: var(--color-bg-tertiary);
-    border: 1px solid var(--color-accent);
+    background: var(--color-accent);
+    border: 1px solid var(--color-accent-dark);
     border-radius: 50px;
-    color: var(--color-accent);
+    color: white;
     font-size: 0.85rem;
     font-weight: 600;
     letter-spacing: 0.1em;
@@ -230,10 +236,7 @@ body {
     font-size: clamp(3rem, 8vw, 5.5rem);
     font-weight: 700;
     line-height: 1.1;
-    background: linear-gradient(135deg, var(--color-text) 0%, var(--color-text-secondary) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--color-text);
     margin-bottom: 0.5rem;
     animation: fadeInUp 0.8s ease 0.3s both;
 }
@@ -283,8 +286,9 @@ body {
 
 .btn-primary {
     background: var(--color-accent);
-    color: var(--color-bg);
+    color: white;
     box-shadow: var(--shadow-md);
+    font-weight: 700;
 }
 
 .btn-primary:hover {
@@ -294,7 +298,7 @@ body {
 }
 
 .btn-secondary {
-    background: transparent;
+    background: var(--color-bg-secondary);
     color: var(--color-text);
     border-color: var(--color-border);
 }
@@ -302,6 +306,7 @@ body {
 .btn-secondary:hover {
     background: var(--color-bg-tertiary);
     border-color: var(--color-accent);
+    color: var(--color-accent);
     transform: translateY(-2px);
 }
 
@@ -476,11 +481,11 @@ section {
 
 .project-status {
     padding: 0.35rem 0.85rem;
-    background: var(--color-bg-tertiary);
+    background: var(--color-accent);
+    color: white;
     border-radius: 50px;
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--color-accent);
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
