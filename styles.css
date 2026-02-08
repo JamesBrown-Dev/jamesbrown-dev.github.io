@@ -2,18 +2,18 @@
    CSS Variables & Root Styles
    ========================================== */
 :root {
-    /* Color Palette - Refined Charcoal & Amber Accents */
-    --color-bg: #0a0a0a;
-    --color-bg-secondary: #141414;
-    --color-bg-tertiary: #1f1f1f;
-    --color-text: #e8e8e8;
-    --color-text-secondary: #a0a0a0;
-    --color-text-muted: #6b6b6b;
-    --color-accent: #ff9500;
-    --color-accent-dark: #cc7700;
-    --color-accent-glow: rgba(255, 149, 0, 0.15);
-    --color-border: #2a2a2a;
-    --color-card: #121212;
+    /* Color Palette - Professional Blue & Slate */
+    --color-bg: #0f1419;
+    --color-bg-secondary: #1a1f2e;
+    --color-bg-tertiary: #252d3d;
+    --color-text: #e6edf3;
+    --color-text-secondary: #8b949e;
+    --color-text-muted: #6e7681;
+    --color-accent: #3b82f6;
+    --color-accent-dark: #2563eb;
+    --color-accent-glow: rgba(59, 130, 246, 0.15);
+    --color-border: #30363d;
+    --color-card: #161b22;
     
     /* Typography */
     --font-primary: 'Archivo', -apple-system, system-ui, sans-serif;

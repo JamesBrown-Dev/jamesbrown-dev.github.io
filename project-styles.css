@@ -2,6 +2,8 @@
    Project Detail Page Styles
    ========================================== */
 
+/* Note: Uses color variables from main styles.css */
+
 /* Project Header */
 .project-detail-header {
     padding: 8rem 0 3rem;
