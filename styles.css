@@ -86,7 +86,7 @@ body {
     position: fixed;
     top: 0;
     width: 100%;
-    background: rgba(248, 246, 243, 0.95);
+    background: rgba(240, 237, 232, 0.95);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--color-border);
     z-index: 1000;
@@ -314,7 +314,7 @@ body {
    Container & Sections
    ========================================== */
 .container {
-    max-width: 1200px;
+    max-width: 1600px;
     margin: 0 auto;
     padding: 0 var(--spacing-md);
 }
@@ -349,7 +349,7 @@ section {
     color: var(--color-text-secondary);
     font-size: 1.15rem;
     margin-bottom: var(--spacing-lg);
-    max-width: 600px;
+    max-width: 750px;
     margin-left: auto;
     margin-right: auto;
 }
@@ -538,72 +538,15 @@ section {
     text-shadow: var(--glow);
 }
 
+
 /* ==========================================
-   Skills Section
+   Contact Me Section
    ========================================== */
-.skills {
+
+.contact {
     background: var(--color-bg-secondary);
 }
 
-.skills-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: var(--spacing-lg);
-    margin-top: var(--spacing-lg);
-}
-
-.skill-category {
-    background: var(--color-card);
-    border: 1px solid var(--color-border);
-    border-radius: 16px;
-    padding: var(--spacing-md);
-}
-
-.skill-category-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: var(--spacing-md);
-    color: var(--color-accent);
-}
-
-.skill-items {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-md);
-}
-
-.skill-item {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.skill-name {
-    font-weight: 600;
-    color: var(--color-text);
-    font-size: 0.95rem;
-}
-
-.skill-bar {
-    height: 8px;
-    background: var(--color-bg-tertiary);
-    border-radius: 10px;
-    overflow: hidden;
-    position: relative;
-}
-
-.skill-progress {
-    height: 100%;
-    background: linear-gradient(90deg, var(--color-accent), var(--color-accent-dark));
-    width: var(--progress);
-    border-radius: 10px;
-    transition: width 1s ease;
-    box-shadow: 0 0 10px var(--color-accent-glow);
-}
-
-/* ==========================================
-   Contact Section
-   ========================================== */
 .contact-content {
     display: grid;
     grid-template-columns: 1fr;
@@ -661,33 +604,12 @@ section {
     color: var(--color-accent-dark);
 }
 
-.contact-cta {
-    background: var(--color-card);
-    border: 1px solid var(--color-border);
-    border-radius: 16px;
-    padding: var(--spacing-lg);
-    text-align: center;
-}
-
-.contact-cta h3 {
-    font-size: 2rem;
-    font-weight: 700;
-    margin-bottom: var(--spacing-md);
-    color: var(--color-text);
-}
-
-.contact-cta p {
-    color: var(--color-text-secondary);
-    margin-bottom: var(--spacing-md);
-    line-height: 1.8;
-    font-size: 1.1rem;
-}
 
 /* ==========================================
    Footer
    ========================================== */
 .footer {
-    background: var(--color-bg-secondary);
+    background: var(--color-bg-tertiary);
     border-top: 1px solid var(--color-border);
     padding: var(--spacing-lg) 0;
     text-align: center;
