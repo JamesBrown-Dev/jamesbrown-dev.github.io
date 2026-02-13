@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Vehicle Network Data Offloading Simulation - University Dissertation Project">
+    <title>Vehicle Network Simulation | James Brown</title>
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="../project-styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="grain-overlay"></div>
+    
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">JB</a>
+            <ul class="nav-menu">
+                <li><a href="../index.html#about" class="nav-link">About</a></li>
+                <li><a href="../index.html#projects" class="nav-link">Projects</a></li>
+                <li><a href="../index.html#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Project Header -->
+    <section class="project-detail-header">
+        <div class="container">
+            <div class="project-header-content">
+                <span class="project-category">Network Simulation Research</span>
+                <h1 class="project-detail-title">Vehicle Network Data Offloading Simulation</h1>
+                <p class="project-tagline">
+                    University dissertation investigating V2V and V2I communication for data offloading in rural vehicular networks using OMNeT++, Veins, and SUMO simulation tools.
+                </p>
+                
+                <div class="project-meta-info">
+                    <div class="meta-item">
+                        <span class="meta-label">Timeline</span>
+                        <span class="meta-value">6 Months</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Role</span>
+                        <span class="meta-value">Research & Development</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Status</span>
+                        <span class="meta-value">Completed</span>
+                    </div>
+                </div>
+
+                <div class="project-actions">
+                    <a href="https://github.com/jamesbrown-dev/vehicle-network-simulation" target="_blank" class="btn btn-primary">View Code</a>
+                    <a href="https://github.com/JamesBrown-Dev/University-Major-Project/blob/master/jib16_ProjectReport_2025.pdf" class="btn btn-secondary">Read Report</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Content -->
+    <section class="project-content">
+        <div class="container">
+            <div class="project-main">
+                
+                <!-- Overview -->
+                <div class="content-section">
+                    <h2 class="section-heading">Project Overview</h2>
+                    <p class="content-text">
+                        This dissertation project investigates whether Vehicle-to-Vehicle (V2V) communication can improve the efficiency of Vehicle-to-Infrastructure (V2I) data offloading in rural vehicular networks. In areas with sparse Roadside Unit (RSU) deployment, vehicles experience intermittent connectivity. By leveraging V2V communication, data can be transferred between vehicles to optimize offloading when RSUs become available.
+                    </p>
+                    <p class="content-text">
+                        The simulation compares scenarios with and without V2V communication using custom data offloading algorithms, testing three distinct V2V methods: RSU Detection, Directional transfer, and Load Spreading.
+                    </p>
+                </div>
+
+                <!-- Tech Stack -->
+                <div class="content-section">
+                    <h2 class="section-heading">Technologies Used</h2>
+                    <div class="tech-stack-grid">
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">⚙️</div>
+                            <div class="tech-name">OMNeT++</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🚗</div>
+                            <div class="tech-name">Veins Framework</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🗺️</div>
+                            <div class="tech-name">SUMO Traffic Simulator</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">💻</div>
+                            <div class="tech-name">C++</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🐍</div>
+                            <div class="tech-name">Python (Analytics)</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">📊</div>
+                            <div class="tech-name">Data Visualization</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Key Features -->
+                <div class="content-section">
+                    <h2 class="section-heading">Key Features</h2>
+                    <ul class="features-list">
+                        <li><strong>Three V2V Methods:</strong> RSU Detection (transfers to vehicles with RSU contact), Directional (backward transfer toward RSUs), Load Spreading (balances data across vehicles)</li>
+                        <li><strong>Custom Simulation Environment:</strong> Rural scenarios with 2km and 6km road networks, configurable RSU placement</li>
+                        <li><strong>Data Loss Mitigation:</strong> Algorithm to reduce transmission failures over long distances</li>
+                        <li><strong>Comprehensive Metrics:</strong> Tracks offloading efficiency, contact duration, beacon messages, transfer rates, and vehicle activity</li>
+                        <li><strong>Python Analytics Suite:</strong> Custom scripts for range plotting, connectivity analysis, data offload tracking, and V2V transfer visualization</li>
+                    </ul>
+                </div>
+
+                <!-- What I Learned -->
+                <div class="content-section">
+                    <h2 class="section-heading">What I Learned</h2>
+                    <div class="learnings-grid">
+                        <div class="learning-card">
+                            <div class="learning-icon">📡</div>
+                            <h3 class="learning-title">Network Simulation</h3>
+                            <p class="learning-text">
+                                Gained expertise in vehicular network simulation using industry-standard tools (OMNeT++, Veins, SUMO) and understanding of V2V/V2I communication protocols.
+                            </p>
+                        </div>
+                        <div class="learning-card">
+                            <div class="learning-icon">🔬</div>
+                            <h3 class="learning-title">Research Methodology</h3>
+                            <p class="learning-text">
+                                Developed skills in experimental design, hypothesis testing, data collection, and drawing conclusions from simulation results.
+                            </p>
+                        </div>
+                        <div class="learning-card">
+                            <div class="learning-icon">💾</div>
+                            <h3 class="learning-title">C++ & Systems Programming</h3>
+                            <p class="learning-text">
+                                Built custom vehicle behavior logic, RSU interactions, and message broadcasting systems in C++ within the Veins framework.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Future Improvements -->
+                <div class="content-section">
+                    <h2 class="section-heading">Research Findings</h2>
+                    <p class="content-text">
+                        <strong>Key Conclusion:</strong> V2V communication significantly improves V2I offloading efficiency. The most effective approach combines Load Spreading (balancing data across vehicles) with Directional transfer (routing data toward RSUs). Adding data loss mitigation further increased total offloaded data by 15-20%.
+                    </p>
+                    <p class="content-text">
+                        The baseline scenario (V2I only) achieved 27.5% offload efficiency, while combined V2V methods reached up to 45% in sparse RSU environments.
+                    </p>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Navigation -->
+    <nav class="project-nav">
+        <div class="container">
+            <div class="project-nav-content">
+                <div class="nav-project prev">
+                    <a href="portfolio-website.html">← Portfolio Website</a>
+                </div>
+                
+                <div class="back-to-projects">
+                    <a href="../index.html#projects">← Back to All Projects</a>
+                </div>
+                
+                <div class="nav-project next">
+                    <!-- Next project -->
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 James Brown. Built with passion and caffeine ☕</p>
+            <p class="footer-note">
+                <a href="../index.html">← Back to Portfolio</a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="../script.js"></script>
+</body>
+</html>
