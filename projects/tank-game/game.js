@@ -104,7 +104,7 @@ const trackMarks = [];
 let trackMarkTimer = 0;
 let lastTime = 0;
 let enemiesDefeated = 0;
-let spawnTimer = 8;        // seconds until next spawn
+let spawnTimer = 4;        // seconds until next spawn
 const maxLiveEnemies = 5;  // cap so the screen doesn't get overrun
 let nextSpawn = null;      // pre-picked spawn position shown as an edge indicator
 let nextSpawn2 = null;     // second spawn position when a double spawn is pre-rolled
@@ -305,7 +305,7 @@ class Enemy {
         this.health = 1 + Math.floor(Math.random() * Math.min(3, 1 + Math.max(0, enemiesDefeated - 2) / 3));
         this.maxHealth = this.health;
         this.speed = 30 + enemiesDefeated * 1;
-        this.isSniper = enemiesDefeated >= 5 && Math.random() < 0.2;
+        this.isSniper = enemiesDefeated >= 5 && Math.random() < 0.99;
         this.color       = this.isSniper ? '#6b0a0a' : '#8B0000';
         this.detailColor = this.isSniper ? '#420000' : '#5a0000';
         this.hatchColor  = this.isSniper ? '#6b0a0a' : '#8B0000';
@@ -322,6 +322,7 @@ class Enemy {
         this.retreatCooldown = this.isSniper ? this.fireTimer : 0; // prevents immediate retreat; resets after each shot
         this.muzzleFlashTimer = 0;
         this.trackMarkTimer = 0;
+        this.spawnProtectionTimer = 2; // can't fire for 2s after spawning
     }
 
     // runs the enemy AI state machine (approach/strafe/retreat), rotates toward desired angle, moves forward, and fires
@@ -433,8 +434,9 @@ class Enemy {
         // shoot at player when fire timer is ready; snipers only tick their timer once nearly stopped
         if (this.isSniper && this.retreatCooldown > 0) this.retreatCooldown -= dt;
         if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer -= dt;
+        if (this.spawnProtectionTimer > 0) this.spawnProtectionTimer -= dt;
         if (!this.isSniper || this.currentSpeed < 3) this.fireTimer -= dt;
-        if (this.fireTimer <= 0 && (!this.isSniper || this.state === 'hold')) {
+        if (this.fireTimer <= 0 && this.spawnProtectionTimer <= 0 && (!this.isSniper || this.state === 'hold')) {
             enemyBullets.push({
                 x: this.x + Math.cos(this.turretAngle) * 22,
                 y: this.y + Math.sin(this.turretAngle) * 22,
@@ -473,16 +475,27 @@ class Enemy {
 
         ctx.restore();
 
-        // turret base
+        // turret — rotate first so the sniper triangle base points with the barrel
         ctx.save();
         ctx.translate(this.x, this.y);
-        ctx.beginPath();
-        ctx.arc(0, 0, 9, 0, Math.PI * 2);
-        ctx.fillStyle = this.dead ? '#444' : this.detailColor;
-        ctx.fill();
-
-        // barrel — snipers have a longer, narrower barrel
         ctx.rotate(this.turretAngle);
+
+        // turret base: triangle for snipers, circle for regular
+        ctx.fillStyle = this.dead ? '#444' : this.detailColor;
+        if (this.isSniper) {
+            ctx.beginPath();
+            ctx.moveTo(12,  0);   // front tip (points toward barrel)
+            ctx.lineTo(-8, -8);   // back top
+            ctx.lineTo(-8,  8);   // back bottom
+            ctx.closePath();
+            ctx.fill();
+        } else {
+            ctx.beginPath();
+            ctx.arc(0, 0, 9, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // barrel
         ctx.fillStyle = this.dead ? '#333' : this.detailColor;
         if (this.isSniper) {
             ctx.fillRect(0, -3, 34, 6);
@@ -735,7 +748,7 @@ function spawnEnemy() {
     pickNextSpawnPos();
 }
 
-spawnEnemy();
+pickNextSpawnPos();
 
 //listens for key down
 document.addEventListener('keydown', function(e) {
@@ -993,7 +1006,7 @@ function restartGame() {
     money = 0;
     score = 0;
     enemiesDefeated = 0;
-    spawnTimer = 8;
+    spawnTimer = 4;
     reloadTimer = 0;
     trackMarkTimer = 0;
     lastTime = 0;
@@ -1027,8 +1040,8 @@ function restartGame() {
     player.vy = 0;
     player.muzzleFlashTimer = 0;
 
-    // spawn first enemy and update UI
-    spawnEnemy();
+    // pick first spawn position (enemy arrives on timer, not instantly)
+    pickNextSpawnPos();
     updateUpgradesUI();
     updateHealthBar();
     updateScore();
