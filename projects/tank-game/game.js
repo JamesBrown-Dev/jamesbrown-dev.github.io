@@ -27,10 +27,10 @@ let gameOver = false;
 const upgradeDefinitions = [
     { name: 'Move Speed',   desc: '+15 px/s',        baseCost: 30,  maxLevel: 5,    apply() { tankSpeed += 15; } },
     { name: 'Turret Speed', desc: '+0.5 turn/s',      baseCost: 30,  maxLevel: 5,    apply() { turretSpeed += 0.25; } },
+    { name: 'Rotate Speed', desc: '+0.25 turn/s',     baseCost: 30, maxLevel: 5, apply() { tankRotateSpeed += 0.25; } },
     { name: 'Bullet Speed', desc: '+100 px/s',        baseCost: 50,  maxLevel: 5,    apply() { bulletSpeed += 100; } },
-    { name: 'Rotate Speed', desc: '+0.25 turn/s',     baseCost: 50, maxLevel: 5, apply() { tankRotateSpeed += 0.25; } },
-    { name: 'Fire Rate',    desc: '-1 reload time',   baseCost: 75,  maxLevel: 5,    apply() { reloadTime = Math.max(1, reloadTime - 1); } },
-    { name: 'Max Health',   desc: '+2 max HP',        baseCost: 100, maxLevel: 3,    apply() { player.maxHealth+=2; } },
+    { name: 'Fire Rate',    desc: '-1s reload time',   baseCost: 75,  maxLevel: 5,    apply() { reloadTime = Math.max(1, reloadTime - 1); } },
+    { name: 'Max Health',   desc: '+2 max HP',        baseCost: 100, maxLevel: 3,    apply() { player.maxHealth += 2; player.health += 2; updateHealthBar(); } },
     { name: 'Bullet Damage',desc: '+1 bullet damage',   baseCost: 100,  maxLevel: 2,    apply() { bulletDamage += 1;} },
 ];
 const upgradeLevels = upgradeDefinitions.map(() => 0);
@@ -107,6 +107,7 @@ let enemiesDefeated = 0;
 let spawnTimer = 8;        // seconds until next spawn
 const maxLiveEnemies = 5;  // cap so the screen doesn't get overrun
 let nextSpawn = null;      // pre-picked spawn position shown as an edge indicator
+let nextSpawn2 = null;     // second spawn position when a double spawn is pre-rolled
 
 class Player {
     constructor(x, y) {
@@ -121,6 +122,10 @@ class Player {
         this.maxHealth = 3;
         this.dying = false;
         this.dyingTimer = 0;
+        this.currentSpeed = 0; // actual movement speed, lerped for smooth acceleration
+        this.vx = 0;           // world-space velocity, used by snipers to lead shots
+        this.vy = 0;
+        this.muzzleFlashTimer = 0;
     }
 
     // handles WASD movement, rotation, boundary clamping, and collision push-out with enemies
@@ -140,14 +145,19 @@ class Player {
             this.angle += rot;
             this.turretAngle += rot;
         }
-        if (keys['w']) {
-            this.x += Math.cos(this.angle) * tankSpeed * dt;
-            this.y += Math.sin(this.angle) * tankSpeed * dt;
-        }
-        if (keys['s']) {
-            this.x -= Math.cos(this.angle) * tankSpeed * dt;
-            this.y -= Math.sin(this.angle) * tankSpeed * dt;
-        }
+        // lerp toward target speed so the tank accelerates and decelerates smoothly
+        let targetSpeed = 0;
+        if (keys['w']) targetSpeed =  tankSpeed;
+        if (keys['s']) targetSpeed = -tankSpeed;
+        this.currentSpeed += (targetSpeed - this.currentSpeed) * Math.min(1, 8 * dt);
+
+        this.x += Math.cos(this.angle) * this.currentSpeed * dt;
+        this.y += Math.sin(this.angle) * this.currentSpeed * dt;
+
+        // keep world-space velocity up to date for sniper prediction
+        this.vx = Math.cos(this.angle) * this.currentSpeed;
+        this.vy = Math.sin(this.angle) * this.currentSpeed;
+        if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer -= dt;
         // clamp position so the tank can't drive off the edge of the canvas
         this.x = Math.max(this.width / 2, Math.min(canvas.width - this.width / 2, this.x));
         this.y = Math.max(this.height / 2, Math.min(canvas.height - this.height / 2, this.y));
@@ -242,6 +252,17 @@ class Player {
         ctx.fillStyle = detailColor;
         ctx.fillRect(0, -4, 22, 8);
 
+        // muzzle flash
+        if (this.muzzleFlashTimer > 0) {
+            const alpha = this.muzzleFlashTimer / 0.12;
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#fff7a0';
+            ctx.beginPath();
+            ctx.arc(22, 0, 7 * alpha, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
         // hatch on turret
         ctx.beginPath();
         ctx.arc(0, 0, 4, 0, Math.PI * 2);
@@ -283,14 +304,24 @@ class Enemy {
         this.height = 30;
         this.health = 1 + Math.floor(Math.random() * Math.min(3, 1 + Math.max(0, enemiesDefeated - 2) / 3));
         this.maxHealth = this.health;
-        this.speed = 30 + enemiesDefeated * 2;
-        this.color = '#8B0000';
+        this.speed = 30 + enemiesDefeated * 1;
+        this.isSniper = enemiesDefeated >= 5 && Math.random() < 0.2;
+        this.color       = this.isSniper ? '#6b0a0a' : '#8B0000';
+        this.detailColor = this.isSniper ? '#420000' : '#5a0000';
+        this.hatchColor  = this.isSniper ? '#6b0a0a' : '#8B0000';
         this.dead = false;
         this.wreckHealth = 5;
         this.state = 'approach';
         this.strafeDirection = Math.random() > 0.5 ? 1 : -1;
         this.strafeTimer = 2 + Math.random() * 2;
-        this.fireTimer = Math.max(1, 1+Math.random()*7 - enemiesDefeated * 0.1);
+        this.fireTimer = this.isSniper
+            ? 3 + Math.random() * 5
+            : Math.max(1, 1 + Math.random() * 7 - enemiesDefeated * 0.05);
+        this.spawnMoveTimer = this.isSniper ? 1 : 0; // must drive forward for 1s before holding
+        this.currentSpeed = this.speed; // used by snipers to smoothly decelerate to a halt
+        this.retreatCooldown = this.isSniper ? this.fireTimer : 0; // prevents immediate retreat; resets after each shot
+        this.muzzleFlashTimer = 0;
+        this.trackMarkTimer = 0;
     }
 
     // runs the enemy AI state machine (approach/strafe/retreat), rotates toward desired angle, moves forward, and fires
@@ -302,16 +333,40 @@ class Enemy {
         const dist = Math.sqrt(dx * dx + dy * dy);
         const angleToPlayer = Math.atan2(dy, dx);
 
-        // turret always aims at player
-        this.turretAngle = angleToPlayer;
+        // turret aims at player; snipers lead the shot based on player velocity
+        if (this.isSniper && this.state === 'hold') {
+            const sniperBulletSpeed = 700 + enemiesDefeated * 7;
+            const travelTime = dist / sniperBulletSpeed;
+            const predictX = player.x + player.vx * travelTime;
+            const predictY = player.y + player.vy * travelTime;
+            this.turretAngle = Math.atan2(predictY - this.y, predictX - this.x);
+        } else {
+            this.turretAngle = angleToPlayer;
+        }
 
         // switch state based on distance to player
-        if (dist > 300) {
-            this.state = 'approach';
-        } else if (dist < 150) {
-            this.state = 'retreat';
+        if (this.isSniper) {
+            if (this.spawnMoveTimer > 0) {
+                // force approach for the first second after spawning
+                this.spawnMoveTimer -= dt;
+                this.state = 'approach';
+            } else if (dist > (this.state === 'hold' ? 850 : 750)) {
+                // approach until 750px; once holding, don't leave until 850px
+                this.state = 'approach';
+            } else if (dist < 220) {
+                // wait out the cooldown so the sniper can get a shot off before retreating
+                this.state = this.retreatCooldown > 0 ? 'hold' : 'retreat';
+            } else {
+                this.state = 'hold';
+            }
         } else {
-            this.state = 'strafe';
+            if (dist > 300) {
+                this.state = 'approach';
+            } else if (dist < 150) {
+                this.state = 'retreat';
+            } else {
+                this.state = 'strafe';
+            }
         }
 
         // occasionally flip strafe direction to feel less predictable
@@ -327,6 +382,8 @@ class Enemy {
             desiredAngle = angleToPlayer;
         } else if (this.state === 'retreat') {
             desiredAngle = angleToPlayer + Math.PI;
+        } else if (this.state === 'hold') {
+            desiredAngle = this.angle; // stay facing current direction
         } else {
             // strafe: face perpendicular to the player, then drive forward
             desiredAngle = angleToPlayer + (Math.PI / 2) * this.strafeDirection;
@@ -338,9 +395,16 @@ class Enemy {
         if (diff < -Math.PI) diff += Math.PI * 2;
         this.angle += Math.sign(diff) * Math.min(Math.abs(diff), 1.5 * dt);
 
-        // always drive forward along the direction the body is facing
-        this.x += Math.cos(this.angle) * this.speed * dt;
-        this.y += Math.sin(this.angle) * this.speed * dt;
+        // snipers decelerate smoothly toward 0 when holding, accelerate back when moving
+        if (this.isSniper) {
+            const targetSpeed = this.state === 'hold' ? 0 : this.speed;
+            this.currentSpeed += (targetSpeed - this.currentSpeed) * Math.min(1, 4 * dt);
+            this.x += Math.cos(this.angle) * this.currentSpeed * dt;
+            this.y += Math.sin(this.angle) * this.currentSpeed * dt;
+        } else if (this.state !== 'hold') {
+            this.x += Math.cos(this.angle) * this.speed * dt;
+            this.y += Math.sin(this.angle) * this.speed * dt;
+        }
 
         // clamp to canvas
         this.x = Math.max(this.width / 2, Math.min(canvas.width - this.width / 2, this.x));
@@ -359,17 +423,30 @@ class Enemy {
             }
         }
 
-        // shoot at player when fire timer is ready (turret always faces player)
-        this.fireTimer -= dt;
-        if (this.fireTimer <= 0) {
+        // drop track marks while moving; snipers only leave marks when actually rolling
+        this.trackMarkTimer -= dt;
+        if (this.trackMarkTimer <= 0 && (!this.isSniper || this.currentSpeed > 3)) {
+            trackMarks.push({ x: this.x, y: this.y, angle: this.angle, alpha: 0.3 });
+            this.trackMarkTimer = 0.1;
+        }
+
+        // shoot at player when fire timer is ready; snipers only tick their timer once nearly stopped
+        if (this.isSniper && this.retreatCooldown > 0) this.retreatCooldown -= dt;
+        if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer -= dt;
+        if (!this.isSniper || this.currentSpeed < 3) this.fireTimer -= dt;
+        if (this.fireTimer <= 0 && (!this.isSniper || this.state === 'hold')) {
             enemyBullets.push({
                 x: this.x + Math.cos(this.turretAngle) * 22,
                 y: this.y + Math.sin(this.turretAngle) * 22,
                 angle: this.turretAngle,
-                speed: 400 + enemiesDefeated*5,
+                speed: this.isSniper ? 700 + enemiesDefeated * 7 : 400 + enemiesDefeated * 5,
                 shooter: this
             });
-            this.fireTimer = 2 + Math.random() * 2;
+            this.fireTimer = this.isSniper
+                ? 3 + Math.random() * 3
+                : 2 + Math.random() * 2;
+            if (this.isSniper) this.retreatCooldown = 2.0; // allow 2s after each shot before retreating
+            this.muzzleFlashTimer = 0.12;
         }
     }
 
@@ -389,7 +466,7 @@ class Enemy {
         ctx.fillRect(-20, -11, 40, 22);
 
         // vents
-        ctx.fillStyle = this.dead ? '#333' : '#5a0000';
+        ctx.fillStyle = this.dead ? '#333' : this.detailColor;
         ctx.fillRect(-19, -8, 6, 3);
         ctx.fillRect(-19, -1, 6, 3);
         ctx.fillRect(-19, 5, 6, 3);
@@ -401,18 +478,34 @@ class Enemy {
         ctx.translate(this.x, this.y);
         ctx.beginPath();
         ctx.arc(0, 0, 9, 0, Math.PI * 2);
-        ctx.fillStyle = this.dead ? '#444' : '#5a0000';
+        ctx.fillStyle = this.dead ? '#444' : this.detailColor;
         ctx.fill();
 
-        // barrel
+        // barrel — snipers have a longer, narrower barrel
         ctx.rotate(this.turretAngle);
-        ctx.fillStyle = this.dead ? '#333' : '#5a0000';
-        ctx.fillRect(0, -4, 22, 8);
+        ctx.fillStyle = this.dead ? '#333' : this.detailColor;
+        if (this.isSniper) {
+            ctx.fillRect(0, -3, 34, 6);
+        } else {
+            ctx.fillRect(0, -4, 22, 8);
+        }
+
+        // muzzle flash
+        if (!this.dead && this.muzzleFlashTimer > 0) {
+            const alpha = this.muzzleFlashTimer / 0.12;
+            const tipX = this.isSniper ? 34 : 22;
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#fff7a0';
+            ctx.beginPath();
+            ctx.arc(tipX, 0, 7 * alpha, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
 
         // hatch
         ctx.beginPath();
         ctx.arc(0, 0, 4, 0, Math.PI * 2);
-        ctx.fillStyle = this.dead ? '#444' : '#8B0000';
+        ctx.fillStyle = this.dead ? '#444' : this.hatchColor;
         ctx.fill();
         ctx.strokeStyle = 'black';
         ctx.lineWidth = 1;
@@ -431,7 +524,6 @@ class Enemy {
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(barX, barY, barW, barH);
 
-            // health fill
             ctx.fillStyle = '#cc2200';
             ctx.fillRect(barX, barY, (this.health / this.maxHealth) * barW, barH);
 
@@ -617,19 +709,29 @@ function drawExplosions() {
 let crateSpawnTimer = 10;
 const maxCrates = 3;
 
-// picks and stores a random spawn position on one of the four canvas edges
-function pickNextSpawnPos() {
+// returns a random position on one of the four canvas edges
+function randomEdgePos() {
     const side = Math.floor(Math.random() * 4);
-    if (side === 0) nextSpawn = { x: Math.random() * canvas.width, y: 0 };
-    else if (side === 1) nextSpawn = { x: canvas.width, y: Math.random() * canvas.height };
-    else if (side === 2) nextSpawn = { x: Math.random() * canvas.width, y: canvas.height };
-    else nextSpawn = { x: 0, y: Math.random() * canvas.height };
+    if (side === 0) return { x: Math.random() * canvas.width, y: 0 };
+    if (side === 1) return { x: canvas.width, y: Math.random() * canvas.height };
+    if (side === 2) return { x: Math.random() * canvas.width, y: canvas.height };
+    return { x: 0, y: Math.random() * canvas.height };
 }
 
-// spawns an enemy at the pre-picked position then immediately picks the next one
+// pre-picks the next spawn position(s); also pre-rolls whether a double spawn will occur
+function pickNextSpawnPos() {
+    nextSpawn = randomEdgePos();
+    nextSpawn2 = (enemiesDefeated >= 7 && Math.random() < 0.5) ? randomEdgePos() : null;
+}
+
+// spawns enemy/enemies at the pre-picked position(s) then immediately picks the next ones
 function spawnEnemy() {
     if (!nextSpawn) pickNextSpawnPos();
+    const liveCount = enemies.filter(e => !e.dead).length;
     enemies.push(new Enemy(nextSpawn.x, nextSpawn.y));
+    if (nextSpawn2 && liveCount + 1 < maxLiveEnemies) {
+        enemies.push(new Enemy(nextSpawn2.x, nextSpawn2.y));
+    }
     pickNextSpawnPos();
 }
 
@@ -661,6 +763,7 @@ canvas.addEventListener('click', function() {
         angle: player.turretAngle,
         speed: bulletSpeed
     });
+    player.muzzleFlashTimer = 0.12;
     reloadTimer = reloadTime;
 });
 
@@ -808,27 +911,14 @@ function updateTrackMarks(dt) {
     }
 }
 
-// draws a flashing arrow on the canvas edge showing where the next enemy will spawn
-function drawSpawnIndicator() {
-    if (!nextSpawn || gameOver) return;
-    const liveCount = enemies.filter(e => !e.dead).length;
-    if (liveCount >= maxLiveEnemies) return; // timer is frozen, no spawn imminent
-
-    const { x, y } = nextSpawn;
-
-    // nudge the indicator inward so it sits on-screen
+// draws a single flashing arrow at a canvas-edge position
+function drawSpawnArrow(pos, alpha, g) {
+    const { x, y } = pos;
     let drawX = x, drawY = y, arrowAngle;
     if (y <= 1)                    { drawY = 14;                 arrowAngle = Math.PI / 2; }
     else if (x >= canvas.width-1)  { drawX = canvas.width - 14;  arrowAngle = Math.PI; }
     else if (y >= canvas.height-1) { drawY = canvas.height - 14; arrowAngle = -Math.PI / 2; }
     else                           { drawX = 14;                 arrowAngle = 0; }
-
-    // smooth sine pulse at a fixed rate (no phase jumping as timer changes)
-    const alpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(Date.now() / 700 * Math.PI * 2));
-
-    // colour shifts yellow → orange → red as urgency increases
-    const urgency = Math.max(0, 1 - spawnTimer / 8);
-    const g = Math.round(180 * (1 - urgency));
 
     ctx.save();
     ctx.translate(drawX, drawY);
@@ -847,6 +937,22 @@ function drawSpawnIndicator() {
     ctx.stroke();
 
     ctx.restore();
+}
+
+// draws flashing arrows on the canvas edge showing where the next enemy/enemies will spawn
+function drawSpawnIndicator() {
+    if (!nextSpawn || gameOver) return;
+    const liveCount = enemies.filter(e => !e.dead).length;
+    if (liveCount >= maxLiveEnemies) return; // timer is frozen, no spawn imminent
+
+    // smooth sine pulse at a fixed rate
+    const alpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(Date.now() / 700 * Math.PI * 2));
+    // colour shifts yellow → orange → red as urgency increases
+    const urgency = Math.max(0, 1 - spawnTimer / 8);
+    const g = Math.round(180 * (1 - urgency));
+
+    drawSpawnArrow(nextSpawn, alpha, g);
+    if (nextSpawn2 && liveCount + 1 < maxLiveEnemies) drawSpawnArrow(nextSpawn2, alpha, g);
 }
 
 // fills the canvas with a flat green background each frame
@@ -904,6 +1010,7 @@ function restartGame() {
     crates.length = 0;
     explosions.length = 0;
     nextSpawn = null;
+    nextSpawn2 = null;
     crateSpawnTimer = 10;
 
     // reset player
@@ -915,6 +1022,10 @@ function restartGame() {
     player.maxHealth = 3;
     player.dying = false;
     player.dyingTimer = 0;
+    player.currentSpeed = 0;
+    player.vx = 0;
+    player.vy = 0;
+    player.muzzleFlashTimer = 0;
 
     // spawn first enemy and update UI
     spawnEnemy();
