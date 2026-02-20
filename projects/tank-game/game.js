@@ -5,31 +5,35 @@ const mouse = { x: 0, y: 0 };
 
 // game settings — use let so upgrades can modify them
 let turretSpeed = 1;
-const tankRotateSpeed = 1;
+let tankRotateSpeed = 1;
 let tankSpeed = 50;
 let bulletSpeed = 400;
 let reloadTime = 7;
+let bulletDamage = 1;
 
 // base values used to reset upgradeable settings on restart
 const BASE_TURRET_SPEED = 1;
 const BASE_TANK_SPEED = 50;
 const BASE_BULLET_SPEED = 400;
-const BASE_RELOAD_TIME = 7;
+const BASE_RELOAD_TIME = 6;
 
 let money = 0;
 let gameOver = false;
 
 // each upgrade: name, description, cost per level, max levels, and what it does
 const upgradeDefinitions = [
-    { name: 'Move Speed',   desc: '+15 px/s',        baseCost: 50,  maxLevel: 5,    apply() { tankSpeed += 15; } },
+    { name: 'Move Speed',   desc: '+15 px/s',        baseCost: 30,  maxLevel: 5,    apply() { tankSpeed += 15; } },
+    { name: 'Turret Speed', desc: '+0.5 turn/s',      baseCost: 30,  maxLevel: 5,    apply() { turretSpeed += 0.25; } },
+    { name: 'Bullet Speed', desc: '+100 px/s',        baseCost: 50,  maxLevel: 5,    apply() { bulletSpeed += 100; } },
+    { name: 'Rotate Speed', desc: '+0.25 turn/s',     baseCost: 50, maxLevel: 5, apply() { tankRotateSpeed += 0.25; } },
     { name: 'Fire Rate',    desc: '-1 reload time',   baseCost: 75,  maxLevel: 5,    apply() { reloadTime = Math.max(1, reloadTime - 1); } },
-    { name: 'Bullet Speed', desc: '+100 px/s',        baseCost: 60,  maxLevel: 5,    apply() { bulletSpeed += 100; } },
-    { name: 'Turret Speed', desc: '+0.5 turn/s',      baseCost: 40,  maxLevel: 5,    apply() { turretSpeed += 0.5; } },
-    { name: 'Max Health',   desc: '+1 max HP',        baseCost: 150, maxLevel: 3,    apply() { player.maxHealth++; player.health = player.maxHealth; } },
+    { name: 'Max Health',   desc: '+2 max HP',        baseCost: 150, maxLevel: 3,    apply() { player.maxHealth+=2; player.health = player.maxHealth; } },
+    { name: 'Bullet Damage',desc: '+1 bullet damage',   baseCost: 150,  maxLevel: 2,    apply() { bulletDamage += 1;} },
     { name: 'Repair',       desc: 'restore 1 HP',     baseCost: 100, maxLevel: null, apply() { player.health = Math.min(player.health + 1, player.maxHealth); } },
 ];
 const upgradeLevels = upgradeDefinitions.map(() => 0);
 
+// returns the current price of an upgrade, scaling up 50% per level already bought
 function getUpgradeCost(index) {
     const def = upgradeDefinitions[index];
     // repair always costs the same; others scale up 50% per level bought
@@ -37,6 +41,7 @@ function getUpgradeCost(index) {
     return def.baseCost + upgradeLevels[index] * Math.floor(def.baseCost * 0.5);
 }
 
+// validates and applies an upgrade purchase, deducting the cost from money
 function buyUpgrade(index) {
     const def = upgradeDefinitions[index];
     const isRepair = def.maxLevel === null;
@@ -50,6 +55,7 @@ function buyUpgrade(index) {
     updateUpgradesUI();
 }
 
+// refreshes the money display and all upgrade button states (cost, level, disabled)
 function updateUpgradesUI() {
     document.getElementById('money-display').textContent = `£${money}`;
     document.querySelectorAll('.upgrade-item').forEach((item, i) => {
@@ -70,6 +76,7 @@ function updateUpgradesUI() {
     updateHealthBar();
 }
 
+// builds the upgrade panel HTML from upgradeDefinitions on first load
 function initUpgradesUI() {
     const list = document.getElementById('upgrade-list');
     upgradeDefinitions.forEach((def, i) => {
@@ -113,6 +120,7 @@ class Player {
         this.dyingTimer = 0;
     }
 
+    // handles WASD movement, rotation, boundary clamping, and collision push-out with enemies
     update(dt) {
         if (this.dying) {
             this.dyingTimer -= dt;
@@ -154,6 +162,7 @@ class Player {
         }
     }
 
+    // rotates the turret toward the mouse at a constant speed using shortest-path angle normalisation
     updateTurret(dt) {
         if (this.dying) return;
         // get the angle from the tank centre to the mouse in world space
@@ -176,6 +185,7 @@ class Player {
         if (this.turretAngle < -Math.PI) this.turretAngle += Math.PI * 2;
     }
 
+    // draws the player tank body, tracks, turret, and aim line; uses grey colours when dying
     draw() {
         const bodyColor   = this.dying ? '#555' : this.color;
         const detailColor = this.dying ? '#333' : '#2d5216';
@@ -268,17 +278,20 @@ class Enemy {
         this.turretAngle = 0;
         this.width = 40;
         this.height = 30;
-        // each enemy gets 1 more health per 3 defeated
-        this.health = 1 + Math.floor(enemiesDefeated / 3);
+        // each enemy gets 1 more health per 3 defeated, capped at 3
+        this.health = Math.min(3, 1 + Math.floor(enemiesDefeated / 3));
+        this.maxHealth = this.health;
         this.speed = 30 + enemiesDefeated * 2;
         this.color = '#8B0000';
         this.dead = false;
+        this.wreckHealth = 5;
         this.state = 'approach';
         this.strafeDirection = Math.random() > 0.5 ? 1 : -1;
         this.strafeTimer = 2 + Math.random() * 2;
-        this.fireTimer = 1 + Math.random() * 2;
+        this.fireTimer = Math.max(1, Math.random()*7 - enemiesDefeated * 0.1);
     }
 
+    // runs the enemy AI state machine (approach/strafe/retreat), rotates toward desired angle, moves forward, and fires
     update(dt) {
         if (this.dead) return;
 
@@ -333,7 +346,7 @@ class Enemy {
 
         // push out of dead tanks (wrecks)
         for (const other of enemies) {
-            if (!other.dead || other === this) continue;
+            if (other === this) continue; //if (!other.dead || other === this) continue;
             const dx = this.x - other.x;
             const dy = this.y - other.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -351,12 +364,14 @@ class Enemy {
                 x: this.x + Math.cos(this.turretAngle) * 22,
                 y: this.y + Math.sin(this.turretAngle) * 22,
                 angle: this.turretAngle,
-                speed: bulletSpeed
+                speed: 400 + enemiesDefeated*5,
+                shooter: this
             });
             this.fireTimer = 2 + Math.random() * 2;
         }
     }
 
+    // draws the enemy tank; uses grey colours when dead to show it as a wreck
     draw() {
         ctx.save();
         ctx.translate(this.x, this.y);
@@ -402,13 +417,54 @@ class Enemy {
         ctx.stroke();
 
         ctx.restore();
+
+        // health bar — live enemies show red HP bar, wrecks show brown durability bar
+        if (!this.dead) {
+            const barW = 40;
+            const barH = 5;
+            const barX = this.x - barW / 2;
+            const barY = this.y - 32;
+
+            // background track
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(barX, barY, barW, barH);
+
+            // health fill
+            ctx.fillStyle = '#cc2200';
+            ctx.fillRect(barX, barY, (this.health / this.maxHealth) * barW, barH);
+
+            // text
+            ctx.fillStyle = 'white';
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${this.health}/${this.maxHealth}`, this.x, barY - 2);
+            ctx.textAlign = 'left'; // reset to default
+        } else {
+            // wreck durability bar
+            const barW = 40;
+            const barH = 4;
+            const barX = this.x - barW / 2;
+            const barY = this.y - 32;
+
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(barX, barY, barW, barH);
+
+            ctx.fillStyle = '#6b4423';
+            ctx.fillRect(barX, barY, (this.wreckHealth / 5) * barW, barH);
+
+            ctx.fillStyle = '#aaa';
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${this.wreckHealth}/5`, this.x, barY - 2);
+            ctx.textAlign = 'left';
+        }
     }
 }
 
 const player = new Player(400, 300);
 const enemies = [];
 
-// spawn an enemy at a random position on the edge of the canvas
+// creates a new enemy at a random point on one of the four canvas edges
 function spawnEnemy() {
     const side = Math.floor(Math.random() * 4);
     let x, y;
@@ -450,6 +506,8 @@ canvas.addEventListener('click', function() {
     reloadTimer = reloadTime;
 });
 
+// checks whether a bullet point is inside a rotated rectangle (the target tank)
+// works by transforming the bullet into the target's local coordinate space first
 function rectCollision(bullet, target) {
     const dx = bullet.x - target.x;
     const dy = bullet.y - target.y;
@@ -458,18 +516,25 @@ function rectCollision(bullet, target) {
     return Math.abs(localX) < target.width / 2 && Math.abs(localY) < target.height / 2;
 }
 
+// tests every player bullet against every enemy; removes the bullet on hit and reduces enemy health
 function checkBulletEnemyCollisions() {
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
         for (let ei = enemies.length - 1; ei >= 0; ei--) {
             if (rectCollision(bullets[bi], enemies[ei])) {
                 bullets.splice(bi, 1);
                 if (!enemies[ei].dead) {
-                    enemies[ei].health--;
+                    enemies[ei].health-=bulletDamage;
                     if (enemies[ei].health <= 0) {
                         enemies[ei].dead = true;
                         enemiesDefeated++;
-                        money += 30 + enemiesDefeated * 5; // £30 base, +£5 per kill
+                        money += 20 + enemiesDefeated; //20 per tank max health
                         updateUpgradesUI();
+                    }
+                } else {
+                    // hit a wreck — damage it and remove it entirely when destroyed
+                    enemies[ei].wreckHealth-=bulletDamage;
+                    if (enemies[ei].wreckHealth <= 0) {
+                        enemies.splice(ei, 1);
                     }
                 }
                 break;
@@ -478,6 +543,7 @@ function checkBulletEnemyCollisions() {
     }
 }
 
+// moves enemy bullets, removes them if out of bounds or hitting a wreck, and deals damage to the player on hit
 function updateEnemyBullets(dt) {
     for (let i = enemyBullets.length - 1; i >= 0; i--) {
         enemyBullets[i].x += Math.cos(enemyBullets[i].angle) * enemyBullets[i].speed * dt;
@@ -490,15 +556,28 @@ function updateEnemyBullets(dt) {
             continue;
         }
 
-        // check if enemy bullet hits a dead tank (wreck)
-        let hitWreck = false;
-        for (const enemy of enemies) {
-            if (enemy.dead && rectCollision(enemyBullets[i], enemy)) {
-                hitWreck = true;
+        // check if enemy bullet hits any other tank (live or wreck), skipping the shooter
+        let hitOtherEnemy = false;
+        for (let wi = enemies.length - 1; wi >= 0; wi--) {
+            if (enemies[wi] === enemyBullets[i].shooter) continue;
+            if (rectCollision(enemyBullets[i], enemies[wi])) {
+                if (!enemies[wi].dead) {
+                    enemies[wi].health--;
+                    if (enemies[wi].health <= 0) {
+                        enemies[wi].dead = true;
+                        enemiesDefeated++;
+                        money += 30 + enemiesDefeated * 5;
+                        updateUpgradesUI();
+                    }
+                } else {
+                    enemies[wi].wreckHealth--;
+                    if (enemies[wi].wreckHealth <= 0) enemies.splice(wi, 1);
+                }
+                hitOtherEnemy = true;
                 break;
             }
         }
-        if (hitWreck) {
+        if (hitOtherEnemy) {
             enemyBullets.splice(i, 1);
             continue;
         }
@@ -520,6 +599,7 @@ function updateEnemyBullets(dt) {
     }
 }
 
+// draws all active enemy bullets as small red circles
 function drawEnemyBullets() {
     ctx.fillStyle = '#ff4444';
     for (const bullet of enemyBullets) {
@@ -529,6 +609,7 @@ function drawEnemyBullets() {
     }
 }
 
+// ticks the reload timer and moves player bullets forward, removing any that leave the canvas
 function updateBullets(dt) {
     if (reloadTimer > 0) reloadTimer -= dt;
 
@@ -545,6 +626,7 @@ function updateBullets(dt) {
     }
 }
 
+// drops track mark stamps while the player is moving and fades older ones out over time
 function updateTrackMarks(dt) {
     trackMarkTimer -= dt;
     if ((keys['w'] || keys['s']) && trackMarkTimer <= 0) {
@@ -557,11 +639,13 @@ function updateTrackMarks(dt) {
     }
 }
 
+// fills the canvas with a flat green background each frame
 function drawBackground() {
     ctx.fillStyle = '#7aad5c';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
+// renders all stored track marks as faded brown rectangles at the saved position and angle
 function drawTrackMarks() {
     for (const mark of trackMarks) {
         ctx.save();
@@ -574,11 +658,13 @@ function drawTrackMarks() {
     }
 }
 
+// sets the game over flag and shows the game over overlay
 function triggerGameOver() {
     gameOver = true;
     document.getElementById('game-over-screen').classList.add('visible');
 }
 
+// resets all game state back to defaults and restarts the game loop
 function restartGame() {
     // reset upgradeable game settings to their base values
     turretSpeed = BASE_TURRET_SPEED;
@@ -623,6 +709,7 @@ function restartGame() {
     requestAnimationFrame(gameLoop);
 }
 
+// updates the HTML health bar width and colour to reflect the player's current health
 function updateHealthBar() {
     const pct = player.health / player.maxHealth;
     document.getElementById('health-bar-fill').style.width = `${pct * 100}%`;
@@ -633,6 +720,7 @@ function updateHealthBar() {
     else fill.style.background = '#b03020';
 }
 
+// counts down the spawn timer and creates a new enemy when it expires, up to the live enemy cap
 function updateSpawning(dt) {
     const liveCount = enemies.filter(e => !e.dead).length;
     if (liveCount >= maxLiveEnemies) return;
@@ -645,6 +733,7 @@ function updateSpawning(dt) {
     }
 }
 
+// draws all active player bullets as small black circles
 function drawBullets() {
     ctx.fillStyle = 'black';
     for (const bullet of bullets) {
@@ -654,6 +743,7 @@ function drawBullets() {
     }
 }
 
+// main loop — called once per frame by requestAnimationFrame, calculates delta time and runs all updates and draws
 function gameLoop(timestamp) {
     // timestamp is provided by requestAnimationFrame in milliseconds
     // skip the first frame (lastTime = 0) to avoid a huge initial deltaTime
