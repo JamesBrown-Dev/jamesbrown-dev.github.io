@@ -305,7 +305,7 @@ class Enemy {
         this.health = 1 + Math.floor(Math.random() * Math.min(3, 1 + Math.max(0, enemiesDefeated - 2) / 3));
         this.maxHealth = this.health;
         this.speed = 30 + enemiesDefeated * 1;
-        this.isSniper = enemiesDefeated >= 5 && Math.random() < 0.99;
+        this.isSniper = enemiesDefeated >= 5 && Math.random() < 0.2;
         this.color       = this.isSniper ? '#6b0a0a' : '#8B0000';
         this.detailColor = this.isSniper ? '#420000' : '#5a0000';
         this.hatchColor  = this.isSniper ? '#6b0a0a' : '#8B0000';
