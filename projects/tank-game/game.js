@@ -310,7 +310,7 @@ class Enemy {
         this.detailColor = this.isSniper ? '#420000' : '#5a0000';
         this.hatchColor  = this.isSniper ? '#6b0a0a' : '#8B0000';
         this.dead = false;
-        this.wreckHealth = 5;
+        this.wreckHealth = 3;
         this.state = 'approach';
         this.strafeDirection = Math.random() > 0.5 ? 1 : -1;
         this.strafeTimer = 2 + Math.random() * 2;
@@ -544,12 +544,12 @@ class Enemy {
             ctx.fillRect(barX, barY, barW, barH);
 
             ctx.fillStyle = '#6b4423';
-            ctx.fillRect(barX, barY, (this.wreckHealth / 5) * barW, barH);
+            ctx.fillRect(barX, barY, (this.wreckHealth / 3) * barW, barH);
 
             ctx.fillStyle = '#aaa';
             ctx.font = '9px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText(`${this.wreckHealth}/5`, this.x, barY - 2);
+            ctx.fillText(`${this.wreckHealth}/3`, this.x, barY - 2);
             ctx.textAlign = 'left';
         }
     }
