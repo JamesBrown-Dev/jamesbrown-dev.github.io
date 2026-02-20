@@ -19,7 +19,7 @@ const BASE_BULLET_SPEED = 400;
 const BASE_RELOAD_TIME = 6;
 const BASE_BULLET_DAMAGE = 1
 
-let money = 0;
+let money = 5000;
 let score = 0;
 let gameOver = false;
 
@@ -1003,7 +1003,7 @@ function restartGame() {
     bulletDamage =BASE_BULLET_DAMAGE
 
     // reset counters and timers
-    money = 0;
+    money = 5000;
     score = 0;
     enemiesDefeated = 0;
     spawnTimer = 4;
