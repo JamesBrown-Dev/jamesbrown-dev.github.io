@@ -3,6 +3,7 @@ const ctx = canvas.getContext('2d');
 const keys = {};
 const mouse = { x: 0, y: 0 };
 
+
 // game settings — use let so upgrades can modify them
 let turretSpeed = 1;
 let tankRotateSpeed = 1;
@@ -16,8 +17,10 @@ const BASE_TURRET_SPEED = 1;
 const BASE_TANK_SPEED = 50;
 const BASE_BULLET_SPEED = 400;
 const BASE_RELOAD_TIME = 6;
+const BASE_BULLET_DAMAGE = 1
 
 let money = 0;
+let score = 0;
 let gameOver = false;
 
 // each upgrade: name, description, cost per level, max levels, and what it does
@@ -27,9 +30,8 @@ const upgradeDefinitions = [
     { name: 'Bullet Speed', desc: '+100 px/s',        baseCost: 50,  maxLevel: 5,    apply() { bulletSpeed += 100; } },
     { name: 'Rotate Speed', desc: '+0.25 turn/s',     baseCost: 50, maxLevel: 5, apply() { tankRotateSpeed += 0.25; } },
     { name: 'Fire Rate',    desc: '-1 reload time',   baseCost: 75,  maxLevel: 5,    apply() { reloadTime = Math.max(1, reloadTime - 1); } },
-    { name: 'Max Health',   desc: '+2 max HP',        baseCost: 150, maxLevel: 3,    apply() { player.maxHealth+=2; player.health = player.maxHealth; } },
-    { name: 'Bullet Damage',desc: '+1 bullet damage',   baseCost: 150,  maxLevel: 2,    apply() { bulletDamage += 1;} },
-    { name: 'Repair',       desc: 'restore 1 HP',     baseCost: 100, maxLevel: null, apply() { player.health = Math.min(player.health + 1, player.maxHealth); } },
+    { name: 'Max Health',   desc: '+2 max HP',        baseCost: 100, maxLevel: 3,    apply() { player.maxHealth+=2; } },
+    { name: 'Bullet Damage',desc: '+1 bullet damage',   baseCost: 100,  maxLevel: 2,    apply() { bulletDamage += 1;} },
 ];
 const upgradeLevels = upgradeDefinitions.map(() => 0);
 
@@ -104,6 +106,7 @@ let lastTime = 0;
 let enemiesDefeated = 0;
 let spawnTimer = 8;        // seconds until next spawn
 const maxLiveEnemies = 5;  // cap so the screen doesn't get overrun
+let nextSpawn = null;      // pre-picked spawn position shown as an edge indicator
 
 class Player {
     constructor(x, y) {
@@ -278,8 +281,7 @@ class Enemy {
         this.turretAngle = 0;
         this.width = 40;
         this.height = 30;
-        // each enemy gets 1 more health per 3 defeated, capped at 3
-        this.health = Math.min(3, 1 + Math.floor(enemiesDefeated / 3));
+        this.health = 1 + Math.floor(Math.random() * Math.min(3, 1 + Math.max(0, enemiesDefeated - 2) / 3));
         this.maxHealth = this.health;
         this.speed = 30 + enemiesDefeated * 2;
         this.color = '#8B0000';
@@ -288,7 +290,7 @@ class Enemy {
         this.state = 'approach';
         this.strafeDirection = Math.random() > 0.5 ? 1 : -1;
         this.strafeTimer = 2 + Math.random() * 2;
-        this.fireTimer = Math.max(1, Math.random()*7 - enemiesDefeated * 0.1);
+        this.fireTimer = Math.max(1, 1+Math.random()*7 - enemiesDefeated * 0.1);
     }
 
     // runs the enemy AI state machine (approach/strafe/retreat), rotates toward desired angle, moves forward, and fires
@@ -461,18 +463,174 @@ class Enemy {
     }
 }
 
+// eases from 0 to 1 with a slight overshoot — gives the crate spawn a pop feel
+function easeOutBack(t) {
+    const c = 1.70158 + 1;
+    return 1 + c * Math.pow(t - 1, 3) + (c - 1) * Math.pow(t - 1, 2);
+}
+
+class Crate {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type; // 'heal' or 'money'
+        this.r = 14;
+        this.progress = 0; // 0→1 spawn animation
+        this.collected = false;
+    }
+
+    // animates the spawn pop-in and checks if the player has walked over it
+    update(dt) {
+        if (this.progress < 1) {
+            this.progress = Math.min(1, this.progress + dt * 5);
+        }
+        if (this.progress >= 1 && !player.dying) {
+            const dist = Math.hypot(player.x - this.x, player.y - this.y);
+            if (dist < this.r + 18) {
+                this.collected = true;
+                if (this.type === 'heal') {
+                    player.health = Math.min(player.health + 1, player.maxHealth);
+                    updateHealthBar();
+                } else {
+                    money += 25 + Math.floor(Math.random() * 26); // £25–50
+                }
+                updateUpgradesUI();
+            }
+        }
+    }
+
+    // draws the crate with a wooden plank texture and a coloured type icon
+    draw() {
+        const scale = easeOutBack(this.progress);
+        if (scale <= 0) return;
+        const r = this.r;
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.scale(scale, scale);
+
+        // horizontal plank bands — alternating shades
+        const bands = ['#9b7a1a', '#8a6c16', '#9b7a1a', '#8a6c16'];
+        const bandH = (r * 2) / bands.length;
+        bands.forEach((col, i) => {
+            ctx.fillStyle = col;
+            ctx.fillRect(-r, -r + i * bandH, r * 2, bandH);
+        });
+
+        // plank dividers
+        ctx.strokeStyle = '#5a3e08';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        [-r / 2, 0, r / 2].forEach(y => { ctx.moveTo(-r, y); ctx.lineTo(r, y); });
+        ctx.moveTo(0, -r); ctx.lineTo(0, r);
+        ctx.stroke();
+
+        // outer border
+        ctx.strokeStyle = '#3a2806';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-r, -r, r * 2, r * 2);
+
+        // corner nails
+        ctx.fillStyle = '#3a2806';
+        const n = r * 0.15;
+        [[-r + n, -r + n], [r - n, -r + n], [-r + n, r - n], [r - n, r - n]].forEach(([nx, ny]) => {
+            ctx.beginPath();
+            ctx.arc(nx, ny, n, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // type icon
+        ctx.fillStyle = this.type === 'heal' ? '#ff5555' : '#f0c040';
+        ctx.font = `bold ${r}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.type === 'heal' ? '+' : '£', 0, 1);
+        ctx.textBaseline = 'alphabetic';
+        ctx.textAlign = 'left';
+
+        ctx.restore();
+    }
+}
+
 const player = new Player(400, 300);
 const enemies = [];
+const crates = [];
+const explosions = [];
 
-// creates a new enemy at a random point on one of the four canvas edges
-function spawnEnemy() {
+// spawns a burst of particles at (x, y); type controls colour and scale
+function spawnExplosion(x, y, type) {
+    let count, colors, speedRange, sizeRange, lifetime;
+    if (type === 'enemy') {
+        count = 18;
+        colors = ['#ff8800', '#ff4400', '#ffdd00', '#cc2200', '#ff6600'];
+        speedRange = [40, 140]; sizeRange = [3, 7]; lifetime = [0.4, 0.8];
+    } else if (type === 'wreck') {
+        count = 10;
+        colors = ['#555', '#888', '#666', '#3a3a3a', '#6b4423'];
+        speedRange = [20, 80]; sizeRange = [2, 5]; lifetime = [0.3, 0.6];
+    } else { // player
+        count = 25;
+        colors = ['#5a8f3c', '#ff8800', '#ff4400', '#ffdd00', '#3d6b1f'];
+        speedRange = [50, 180]; sizeRange = [4, 9]; lifetime = [0.5, 1.0];
+    }
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = speedRange[0] + Math.random() * (speedRange[1] - speedRange[0]);
+        const size  = sizeRange[0]  + Math.random() * (sizeRange[1]  - sizeRange[0]);
+        const life  = lifetime[0]   + Math.random() * (lifetime[1]   - lifetime[0]);
+        explosions.push({
+            x, y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            size,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            life,
+            maxLife: life
+        });
+    }
+}
+
+function updateExplosions(dt) {
+    for (let i = explosions.length - 1; i >= 0; i--) {
+        const p = explosions[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        // simple drag so particles slow down as they spread
+        p.vx *= 1 - 4 * dt;
+        p.vy *= 1 - 4 * dt;
+        p.life -= dt;
+        if (p.life <= 0) explosions.splice(i, 1);
+    }
+}
+
+function drawExplosions() {
+    for (const p of explosions) {
+        const alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+let crateSpawnTimer = 10;
+const maxCrates = 3;
+
+// picks and stores a random spawn position on one of the four canvas edges
+function pickNextSpawnPos() {
     const side = Math.floor(Math.random() * 4);
-    let x, y;
-    if (side === 0) { x = Math.random() * canvas.width; y = 0; }
-    else if (side === 1) { x = canvas.width; y = Math.random() * canvas.height; }
-    else if (side === 2) { x = Math.random() * canvas.width; y = canvas.height; }
-    else { x = 0; y = Math.random() * canvas.height; }
-    enemies.push(new Enemy(x, y));
+    if (side === 0) nextSpawn = { x: Math.random() * canvas.width, y: 0 };
+    else if (side === 1) nextSpawn = { x: canvas.width, y: Math.random() * canvas.height };
+    else if (side === 2) nextSpawn = { x: Math.random() * canvas.width, y: canvas.height };
+    else nextSpawn = { x: 0, y: Math.random() * canvas.height };
+}
+
+// spawns an enemy at the pre-picked position then immediately picks the next one
+function spawnEnemy() {
+    if (!nextSpawn) pickNextSpawnPos();
+    enemies.push(new Enemy(nextSpawn.x, nextSpawn.y));
+    pickNextSpawnPos();
 }
 
 spawnEnemy();
@@ -526,14 +684,18 @@ function checkBulletEnemyCollisions() {
                     enemies[ei].health-=bulletDamage;
                     if (enemies[ei].health <= 0) {
                         enemies[ei].dead = true;
+                        spawnExplosion(enemies[ei].x, enemies[ei].y, 'enemy');
                         enemiesDefeated++;
+                        score++;
                         money += 20 + enemiesDefeated; //20 per tank max health
+                        updateScore();
                         updateUpgradesUI();
                     }
                 } else {
                     // hit a wreck — damage it and remove it entirely when destroyed
                     enemies[ei].wreckHealth-=bulletDamage;
                     if (enemies[ei].wreckHealth <= 0) {
+                        spawnExplosion(enemies[ei].x, enemies[ei].y, 'wreck');
                         enemies.splice(ei, 1);
                     }
                 }
@@ -565,13 +727,19 @@ function updateEnemyBullets(dt) {
                     enemies[wi].health--;
                     if (enemies[wi].health <= 0) {
                         enemies[wi].dead = true;
+                        spawnExplosion(enemies[wi].x, enemies[wi].y, 'enemy');
                         enemiesDefeated++;
+                        score++;
                         money += 30 + enemiesDefeated * 5;
+                        updateScore();
                         updateUpgradesUI();
                     }
                 } else {
                     enemies[wi].wreckHealth--;
-                    if (enemies[wi].wreckHealth <= 0) enemies.splice(wi, 1);
+                    if (enemies[wi].wreckHealth <= 0) {
+                        spawnExplosion(enemies[wi].x, enemies[wi].y, 'wreck');
+                        enemies.splice(wi, 1);
+                    }
                 }
                 hitOtherEnemy = true;
                 break;
@@ -593,6 +761,7 @@ function updateEnemyBullets(dt) {
                 if (player.health <= 0) {
                     player.dying = true;
                     player.dyingTimer = 2;
+                    spawnExplosion(player.x, player.y, 'player');
                 }
             }
         }
@@ -639,6 +808,47 @@ function updateTrackMarks(dt) {
     }
 }
 
+// draws a flashing arrow on the canvas edge showing where the next enemy will spawn
+function drawSpawnIndicator() {
+    if (!nextSpawn || gameOver) return;
+    const liveCount = enemies.filter(e => !e.dead).length;
+    if (liveCount >= maxLiveEnemies) return; // timer is frozen, no spawn imminent
+
+    const { x, y } = nextSpawn;
+
+    // nudge the indicator inward so it sits on-screen
+    let drawX = x, drawY = y, arrowAngle;
+    if (y <= 1)                    { drawY = 14;                 arrowAngle = Math.PI / 2; }
+    else if (x >= canvas.width-1)  { drawX = canvas.width - 14;  arrowAngle = Math.PI; }
+    else if (y >= canvas.height-1) { drawY = canvas.height - 14; arrowAngle = -Math.PI / 2; }
+    else                           { drawX = 14;                 arrowAngle = 0; }
+
+    // smooth sine pulse at a fixed rate (no phase jumping as timer changes)
+    const alpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(Date.now() / 700 * Math.PI * 2));
+
+    // colour shifts yellow → orange → red as urgency increases
+    const urgency = Math.max(0, 1 - spawnTimer / 8);
+    const g = Math.round(180 * (1 - urgency));
+
+    ctx.save();
+    ctx.translate(drawX, drawY);
+    ctx.rotate(arrowAngle);
+
+    const size = 11;
+    ctx.beginPath();
+    ctx.moveTo(size, 0);
+    ctx.lineTo(-size, -size * 0.65);
+    ctx.lineTo(-size,  size * 0.65);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(255, ${g}, 0, ${alpha})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.5})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.restore();
+}
+
 // fills the canvas with a flat green background each frame
 function drawBackground() {
     ctx.fillStyle = '#7aad5c';
@@ -671,9 +881,11 @@ function restartGame() {
     tankSpeed = BASE_TANK_SPEED;
     bulletSpeed = BASE_BULLET_SPEED;
     reloadTime = BASE_RELOAD_TIME;
+    bulletDamage =BASE_BULLET_DAMAGE
 
     // reset counters and timers
     money = 0;
+    score = 0;
     enemiesDefeated = 0;
     spawnTimer = 8;
     reloadTimer = 0;
@@ -689,6 +901,10 @@ function restartGame() {
     enemyBullets.length = 0;
     enemies.length = 0;
     trackMarks.length = 0;
+    crates.length = 0;
+    explosions.length = 0;
+    nextSpawn = null;
+    crateSpawnTimer = 10;
 
     // reset player
     player.x = 400;
@@ -704,9 +920,15 @@ function restartGame() {
     spawnEnemy();
     updateUpgradesUI();
     updateHealthBar();
+    updateScore();
 
     document.getElementById('game-over-screen').classList.remove('visible');
     requestAnimationFrame(gameLoop);
+}
+
+// updates the kills counter in the HUD
+function updateScore() {
+    document.getElementById('score-display').textContent = score;
 }
 
 // updates the HTML health bar width and colour to reflect the player's current health
@@ -743,6 +965,32 @@ function drawBullets() {
     }
 }
 
+// spawns new crates on a timer and updates all existing ones, removing any that have been collected
+function updateCrates(dt) {
+    if (crates.length < maxCrates) {
+        crateSpawnTimer -= dt;
+        if (crateSpawnTimer <= 0) {
+            let x, y, tries = 0;
+            do {
+                x = 80 + Math.random() * (canvas.width - 160);
+                y = 80 + Math.random() * (canvas.height - 160);
+                tries++;
+            } while (tries < 10 && Math.hypot(x - player.x, y - player.y) < 150);
+            crates.push(new Crate(x, y, Math.random() < 0.5 ? 'heal' : 'money'));
+            crateSpawnTimer = 12 + Math.random() * 8; // next crate in 12–20s
+        }
+    }
+    for (let i = crates.length - 1; i >= 0; i--) {
+        crates[i].update(dt);
+        if (crates[i].collected) crates.splice(i, 1);
+    }
+}
+
+// draws all active crates
+function drawCrates() {
+    for (const crate of crates) crate.draw();
+}
+
 // main loop — called once per frame by requestAnimationFrame, calculates delta time and runs all updates and draws
 function gameLoop(timestamp) {
     // timestamp is provided by requestAnimationFrame in milliseconds
@@ -758,15 +1006,21 @@ function gameLoop(timestamp) {
     checkBulletEnemyCollisions();
     updateTrackMarks(deltaTime);
     updateSpawning(deltaTime);
+    updateCrates(deltaTime);
+    updateExplosions(deltaTime);
     for (const enemy of enemies) enemy.update(deltaTime);
     drawTrackMarks();
+    drawCrates();
     for (const enemy of enemies) enemy.draw();
     player.draw();
     drawBullets();
     drawEnemyBullets();
+    drawExplosions();
+    drawSpawnIndicator();
     if (!gameOver) requestAnimationFrame(gameLoop);
 }
 
 initUpgradesUI();
+updateUpgradesUI();
 updateHealthBar();
 gameLoop();

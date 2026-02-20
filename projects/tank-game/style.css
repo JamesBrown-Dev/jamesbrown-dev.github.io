@@ -9,7 +9,7 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
+    min-height: 100vh;
 }
 
 #game-wrapper {
@@ -68,6 +68,24 @@ canvas {
     color: #aaa;
     white-space: nowrap;
     min-width: 36px;
+    text-align: right;
+}
+
+#hud-score-label {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #888;
+    white-space: nowrap;
+    margin-left: 12px;
+}
+
+#score-display {
+    font-family: monospace;
+    font-size: 11px;
+    color: #f0c040;
+    white-space: nowrap;
+    min-width: 24px;
     text-align: right;
 }
 
