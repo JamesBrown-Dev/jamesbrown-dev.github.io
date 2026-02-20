@@ -12,6 +12,210 @@ body {
     height: 100vh;
 }
 
+#game-wrapper {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+#canvas-container {
+    display: flex;
+    flex-direction: column;
+    position: relative; /* needed to anchor the game-over overlay */
+}
+
 canvas {
     border: 2px solid #444;
+    border-top: none;
+    display: block;
+}
+
+/* health bar strip above the canvas */
+#hud {
+    background: #222;
+    border: 2px solid #444;
+    padding: 7px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#hud-label {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #888;
+    white-space: nowrap;
+}
+
+#health-bar-track {
+    flex: 1;
+    height: 14px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+}
+
+#health-bar-fill {
+    height: 100%;
+    width: 100%;
+    background: #5a8f3c;
+    transition: width 0.15s, background 0.3s;
+}
+
+#health-text {
+    font-family: monospace;
+    font-size: 11px;
+    color: #aaa;
+    white-space: nowrap;
+    min-width: 36px;
+    text-align: right;
+}
+
+/* game over overlay */
+#game-over-screen {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.65);
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 48px;
+    z-index: 10;
+}
+
+#game-over-screen.visible {
+    display: flex;
+}
+
+#game-over-text {
+    font-family: monospace;
+    font-size: 64px;
+    font-weight: bold;
+    color: #cc2200;
+    letter-spacing: 8px;
+    text-shadow: 0 0 30px rgba(200, 40, 0, 0.6);
+    animation: slideDown 0.5s ease-out;
+}
+
+#restart-btn {
+    font-family: monospace;
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 4px;
+    color: #ccc;
+    background: #3d6b22;
+    border: 2px solid #5a8f3c;
+    padding: 12px 40px;
+    cursor: pointer;
+    animation: slideUp 0.5s ease-out 0.35s both;
+}
+
+#restart-btn:hover {
+    background: #4a7a28;
+    color: white;
+}
+
+@keyframes slideDown {
+    from { transform: translateY(-160px); opacity: 0; }
+    to   { transform: translateY(0);      opacity: 1; }
+}
+
+@keyframes slideUp {
+    from { transform: translateY(160px); opacity: 0; }
+    to   { transform: translateY(0);     opacity: 1; }
+}
+
+/* upgrades panel */
+#upgrades-panel {
+    width: 160px;
+    background: #222;
+    border: 2px solid #444;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-family: monospace;
+    color: #ddd;
+}
+
+#panel-header {
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 3px;
+    color: #999;
+    text-align: center;
+    border-bottom: 1px solid #3a3a3a;
+    padding-bottom: 8px;
+}
+
+#money-display {
+    font-size: 20px;
+    font-weight: bold;
+    color: #f0c040;
+    text-align: center;
+}
+
+#upgrade-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.upgrade-item {
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    padding: 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.upgrade-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.upgrade-name {
+    font-size: 11px;
+    font-weight: bold;
+    color: #ccc;
+}
+
+.upgrade-level {
+    font-size: 10px;
+    color: #666;
+}
+
+.upgrade-desc {
+    font-size: 10px;
+    color: #777;
+}
+
+.upgrade-btn {
+    background: #3d6b22;
+    color: #ccc;
+    border: 1px solid #4a7a28;
+    padding: 4px 0;
+    font-family: monospace;
+    font-size: 11px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 3px;
+}
+
+.upgrade-btn:hover:not(:disabled) {
+    background: #4a7a28;
+    color: white;
+}
+
+.upgrade-btn:disabled {
+    background: #2a2a2a;
+    color: #555;
+    border-color: #333;
+    cursor: default;
 }
