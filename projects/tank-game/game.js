@@ -19,7 +19,7 @@ const BASE_BULLET_SPEED = 400;
 const BASE_RELOAD_TIME = 6;
 const BASE_BULLET_DAMAGE = 1
 
-let money = 5000;
+let money = 0;
 let score = 0;
 let gameOver = false;
 
@@ -108,6 +108,7 @@ let spawnTimer = 4;        // seconds until next spawn
 const maxLiveEnemies = 5;  // cap so the screen doesn't get overrun
 let nextSpawn = null;      // pre-picked spawn position shown as an edge indicator
 let nextSpawn2 = null;     // second spawn position when a double spawn is pre-rolled
+let playerHitTimer = 0;    // drives the red vignette flash when the player is hit
 
 class Player {
     constructor(x, y) {
@@ -168,6 +169,18 @@ class Player {
             const dy = this.y - enemy.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             const minDist = 38;
+            if (dist < minDist && dist > 0) {
+                this.x += (dx / dist) * (minDist - dist);
+                this.y += (dy / dist) * (minDist - dist);
+            }
+        }
+
+        // push player out of rocks
+        for (const rock of rocks) {
+            const dx = this.x - rock.x;
+            const dy = this.y - rock.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const minDist = rock.r + 22;
             if (dist < minDist && dist > 0) {
                 this.x += (dx / dist) * (minDist - dist);
                 this.y += (dy / dist) * (minDist - dist);
@@ -321,6 +334,7 @@ class Enemy {
         this.currentSpeed = this.speed; // used by snipers to smoothly decelerate to a halt
         this.retreatCooldown = this.isSniper ? this.fireTimer : 0; // prevents immediate retreat; resets after each shot
         this.muzzleFlashTimer = 0;
+        this.hitFlashTimer = 0;
         this.trackMarkTimer = 0;
         this.spawnProtectionTimer = 2; // can't fire for 2s after spawning
     }
@@ -424,6 +438,18 @@ class Enemy {
             }
         }
 
+        // push out of rocks
+        for (const rock of rocks) {
+            const dx = this.x - rock.x;
+            const dy = this.y - rock.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const minDist = rock.r + 22;
+            if (dist < minDist && dist > 0) {
+                this.x += (dx / dist) * (minDist - dist);
+                this.y += (dy / dist) * (minDist - dist);
+            }
+        }
+
         // drop track marks while moving; snipers only leave marks when actually rolling
         this.trackMarkTimer -= dt;
         if (this.trackMarkTimer <= 0 && (!this.isSniper || this.currentSpeed > 3)) {
@@ -434,6 +460,7 @@ class Enemy {
         // shoot at player when fire timer is ready; snipers only tick their timer once nearly stopped
         if (this.isSniper && this.retreatCooldown > 0) this.retreatCooldown -= dt;
         if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer -= dt;
+        if (this.hitFlashTimer > 0) this.hitFlashTimer -= dt;
         if (this.spawnProtectionTimer > 0) this.spawnProtectionTimer -= dt;
         if (!this.isSniper || this.currentSpeed < 3) this.fireTimer -= dt;
         if (this.fireTimer <= 0 && this.spawnProtectionTimer <= 0 && (!this.isSniper || this.state === 'hold')) {
@@ -539,6 +566,14 @@ class Enemy {
 
             ctx.fillStyle = '#cc2200';
             ctx.fillRect(barX, barY, (this.health / this.maxHealth) * barW, barH);
+
+            // hit flash — brief white overlay when damaged
+            if (this.hitFlashTimer > 0) {
+                ctx.globalAlpha = (this.hitFlashTimer / 0.15) * 0.75;
+                ctx.fillStyle = 'white';
+                ctx.fillRect(barX, barY, barW, barH);
+                ctx.globalAlpha = 1;
+            }
 
             // text
             ctx.fillStyle = 'white';
@@ -657,10 +692,50 @@ class Crate {
     }
 }
 
-const player = new Player(400, 300);
+class Rock {
+    constructor(x, y, r) {
+        this.x = x;
+        this.y = y;
+        this.r = r; // collision radius
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // drop shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+        ctx.beginPath();
+        ctx.ellipse(4, 5, this.r * 0.9, this.r * 0.76, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // base rock body
+        ctx.fillStyle = '#7d7d72';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, this.r, this.r * 0.82, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // mid-tone patch for depth
+        ctx.fillStyle = '#5e5e55';
+        ctx.beginPath();
+        ctx.ellipse(this.r * 0.18, this.r * 0.12, this.r * 0.55, this.r * 0.44, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+
+        // highlight
+        ctx.fillStyle = '#a0a095';
+        ctx.beginPath();
+        ctx.ellipse(-this.r * 0.28, -this.r * 0.28, this.r * 0.32, this.r * 0.26, -0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+const player = new Player(550, 375);
 const enemies = [];
 const crates = [];
 const explosions = [];
+const rocks = [];
 
 // spawns a burst of particles at (x, y); type controls colour and scale
 function spawnExplosion(x, y, type) {
@@ -673,6 +748,10 @@ function spawnExplosion(x, y, type) {
         count = 10;
         colors = ['#555', '#888', '#666', '#3a3a3a', '#6b4423'];
         speedRange = [20, 80]; sizeRange = [2, 5]; lifetime = [0.3, 0.6];
+    } else if (type === 'spark') {
+        count = 7;
+        colors = ['#ffdd00', '#ff8800', '#ffffff', '#ffaa00'];
+        speedRange = [40, 130]; sizeRange = [1.5, 3]; lifetime = [0.08, 0.2];
     } else { // player
         count = 25;
         colors = ['#5a8f3c', '#ff8800', '#ff4400', '#ffdd00', '#3d6b1f'];
@@ -722,13 +801,18 @@ function drawExplosions() {
 let crateSpawnTimer = 10;
 const maxCrates = 3;
 
-// returns a random position on one of the four canvas edges
+// returns a random position on one of the four canvas edges, at least 300px from the player
 function randomEdgePos() {
-    const side = Math.floor(Math.random() * 4);
-    if (side === 0) return { x: Math.random() * canvas.width, y: 0 };
-    if (side === 1) return { x: canvas.width, y: Math.random() * canvas.height };
-    if (side === 2) return { x: Math.random() * canvas.width, y: canvas.height };
-    return { x: 0, y: Math.random() * canvas.height };
+    let pos;
+    for (let attempt = 0; attempt < 10; attempt++) {
+        const side = Math.floor(Math.random() * 4);
+        if (side === 0)      pos = { x: Math.random() * canvas.width, y: 0 };
+        else if (side === 1) pos = { x: canvas.width, y: Math.random() * canvas.height };
+        else if (side === 2) pos = { x: Math.random() * canvas.width, y: canvas.height };
+        else                 pos = { x: 0, y: Math.random() * canvas.height };
+        if (Math.hypot(pos.x - player.x, pos.y - player.y) >= 300) return pos;
+    }
+    return pos; // fallback after 10 attempts (very unlikely to be needed)
 }
 
 // pre-picks the next spawn position(s); also pre-rolls whether a double spawn will occur
@@ -795,24 +879,30 @@ function checkBulletEnemyCollisions() {
     for (let bi = bullets.length - 1; bi >= 0; bi--) {
         for (let ei = enemies.length - 1; ei >= 0; ei--) {
             if (rectCollision(bullets[bi], enemies[ei])) {
+                const bx = bullets[bi].x, by = bullets[bi].y;
                 bullets.splice(bi, 1);
                 if (!enemies[ei].dead) {
-                    enemies[ei].health-=bulletDamage;
+                    enemies[ei].health -= bulletDamage;
+                    enemies[ei].hitFlashTimer = 0.15;
                     if (enemies[ei].health <= 0) {
                         enemies[ei].dead = true;
                         spawnExplosion(enemies[ei].x, enemies[ei].y, 'enemy');
                         enemiesDefeated++;
                         score++;
-                        money += 20 + enemiesDefeated; //20 per tank max health
+                        money += 25 + enemiesDefeated * 2; //20 per tank max health
                         updateScore();
                         updateUpgradesUI();
+                    } else {
+                        spawnExplosion(bx, by, 'spark');
                     }
                 } else {
                     // hit a wreck — damage it and remove it entirely when destroyed
-                    enemies[ei].wreckHealth-=bulletDamage;
+                    enemies[ei].wreckHealth -= bulletDamage;
                     if (enemies[ei].wreckHealth <= 0) {
                         spawnExplosion(enemies[ei].x, enemies[ei].y, 'wreck');
                         enemies.splice(ei, 1);
+                    } else {
+                        spawnExplosion(bx, by, 'spark');
                     }
                 }
                 break;
@@ -839,8 +929,10 @@ function updateEnemyBullets(dt) {
         for (let wi = enemies.length - 1; wi >= 0; wi--) {
             if (enemies[wi] === enemyBullets[i].shooter) continue;
             if (rectCollision(enemyBullets[i], enemies[wi])) {
+                const ix = enemyBullets[i].x, iy = enemyBullets[i].y;
                 if (!enemies[wi].dead) {
                     enemies[wi].health--;
+                    enemies[wi].hitFlashTimer = 0.15;
                     if (enemies[wi].health <= 0) {
                         enemies[wi].dead = true;
                         spawnExplosion(enemies[wi].x, enemies[wi].y, 'enemy');
@@ -849,12 +941,16 @@ function updateEnemyBullets(dt) {
                         money += 30 + enemiesDefeated * 5;
                         updateScore();
                         updateUpgradesUI();
+                    } else {
+                        spawnExplosion(ix, iy, 'spark');
                     }
                 } else {
                     enemies[wi].wreckHealth--;
                     if (enemies[wi].wreckHealth <= 0) {
                         spawnExplosion(enemies[wi].x, enemies[wi].y, 'wreck');
                         enemies.splice(wi, 1);
+                    } else {
+                        spawnExplosion(ix, iy, 'spark');
                     }
                 }
                 hitOtherEnemy = true;
@@ -868,16 +964,21 @@ function updateEnemyBullets(dt) {
 
         // check if enemy bullet hits player tank body
         if (rectCollision(enemyBullets[i], player)) {
+            const ix = enemyBullets[i].x, iy = enemyBullets[i].y;
             enemyBullets.splice(i, 1);
             // only deal damage if player is still alive
             if (!player.dying) {
                 player.health--;
+                playerHitTimer = 0.45;
                 updateHealthBar();
+                flashHealthBar();
                 updateUpgradesUI();
                 if (player.health <= 0) {
                     player.dying = true;
                     player.dyingTimer = 2;
                     spawnExplosion(player.x, player.y, 'player');
+                } else {
+                    spawnExplosion(ix, iy, 'spark');
                 }
             }
         }
@@ -968,6 +1069,19 @@ function drawSpawnIndicator() {
     if (nextSpawn2 && liveCount + 1 < maxLiveEnemies) drawSpawnArrow(nextSpawn2, alpha, g);
 }
 
+// draws a red radial vignette that fades out after the player is hit
+function drawHitVignette() {
+    if (playerHitTimer <= 0) return;
+    const alpha = (playerHitTimer / 0.45) * 0.27;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const gradient = ctx.createRadialGradient(cx, cy, canvas.height * 0.55, cx, cy, canvas.height * 1.0);
+    gradient.addColorStop(0, `rgba(180, 0, 0, 0)`);
+    gradient.addColorStop(1, `rgba(180, 0, 0, ${alpha})`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
 // fills the canvas with a flat green background each frame
 function drawBackground() {
     ctx.fillStyle = '#7aad5c';
@@ -990,6 +1104,7 @@ function drawTrackMarks() {
 // sets the game over flag and shows the game over overlay
 function triggerGameOver() {
     gameOver = true;
+    document.getElementById('final-score-value').textContent = score;
     document.getElementById('game-over-screen').classList.add('visible');
 }
 
@@ -1003,7 +1118,7 @@ function restartGame() {
     bulletDamage =BASE_BULLET_DAMAGE
 
     // reset counters and timers
-    money = 5000;
+    money = 0;
     score = 0;
     enemiesDefeated = 0;
     spawnTimer = 4;
@@ -1024,11 +1139,12 @@ function restartGame() {
     explosions.length = 0;
     nextSpawn = null;
     nextSpawn2 = null;
+    playerHitTimer = 0;
     crateSpawnTimer = 10;
 
     // reset player
-    player.x = 400;
-    player.y = 300;
+    player.x = 550;
+    player.y = 375;
     player.angle = 0;
     player.turretAngle = 0;
     player.health = 3;
@@ -1039,6 +1155,9 @@ function restartGame() {
     player.vx = 0;
     player.vy = 0;
     player.muzzleFlashTimer = 0;
+
+    // re-roll rock positions for the new run
+    generateRocks();
 
     // pick first spawn position (enemy arrives on timer, not instantly)
     pickNextSpawnPos();
@@ -1053,6 +1172,14 @@ function restartGame() {
 // updates the kills counter in the HUD
 function updateScore() {
     document.getElementById('score-display').textContent = score;
+}
+
+// briefly flashes the health bar track to signal a hit
+function flashHealthBar() {
+    const track = document.getElementById('health-bar-track');
+    track.classList.remove('hit-flash');
+    void track.offsetWidth; // force reflow so the animation restarts
+    track.classList.add('hit-flash');
 }
 
 // updates the HTML health bar width and colour to reflect the player's current health
@@ -1115,6 +1242,51 @@ function drawCrates() {
     for (const crate of crates) crate.draw();
 }
 
+// randomly places rock formations, keeping them away from canvas edges and the player start
+function generateRocks() {
+    rocks.length = 0;
+    let attempts = 0;
+    while (rocks.length < 3 && attempts < 300) {
+        attempts++;
+        const r = 22 + Math.random() * 16; // radius 22–38px
+        const x = 110 + Math.random() * (canvas.width  - 220);
+        const y = 110 + Math.random() * (canvas.height - 220);
+        if (Math.hypot(x - 550, y - 375) < 185) continue; // clear of player start
+        let overlaps = false;
+        for (const rock of rocks) {
+            if (Math.hypot(x - rock.x, y - rock.y) < r + rock.r + 20) { overlaps = true; break; }
+        }
+        if (!overlaps) rocks.push(new Rock(x, y, r));
+    }
+}
+
+// draws all rock formations
+function drawRocks() {
+    for (const rock of rocks) rock.draw();
+}
+
+// removes any bullet (player or enemy) that hits a rock, spawning an impact spark
+function checkBulletRockCollisions() {
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        for (const rock of rocks) {
+            if (Math.hypot(bullets[i].x - rock.x, bullets[i].y - rock.y) < rock.r) {
+                spawnExplosion(bullets[i].x, bullets[i].y, 'spark');
+                bullets.splice(i, 1);
+                break;
+            }
+        }
+    }
+    for (let i = enemyBullets.length - 1; i >= 0; i--) {
+        for (const rock of rocks) {
+            if (Math.hypot(enemyBullets[i].x - rock.x, enemyBullets[i].y - rock.y) < rock.r) {
+                spawnExplosion(enemyBullets[i].x, enemyBullets[i].y, 'spark');
+                enemyBullets.splice(i, 1);
+                break;
+            }
+        }
+    }
+}
+
 // main loop — called once per frame by requestAnimationFrame, calculates delta time and runs all updates and draws
 function gameLoop(timestamp) {
     // timestamp is provided by requestAnimationFrame in milliseconds
@@ -1127,19 +1299,23 @@ function gameLoop(timestamp) {
     player.updateTurret(deltaTime);
     updateBullets(deltaTime);
     updateEnemyBullets(deltaTime);
+    checkBulletRockCollisions();
     checkBulletEnemyCollisions();
     updateTrackMarks(deltaTime);
     updateSpawning(deltaTime);
     updateCrates(deltaTime);
     updateExplosions(deltaTime);
+    if (playerHitTimer > 0) playerHitTimer -= deltaTime;
     for (const enemy of enemies) enemy.update(deltaTime);
     drawTrackMarks();
+    drawRocks();
     drawCrates();
     for (const enemy of enemies) enemy.draw();
     player.draw();
     drawBullets();
     drawEnemyBullets();
     drawExplosions();
+    drawHitVignette();
     drawSpawnIndicator();
     if (!gameOver) requestAnimationFrame(gameLoop);
 }
@@ -1147,4 +1323,5 @@ function gameLoop(timestamp) {
 initUpgradesUI();
 updateUpgradesUI();
 updateHealthBar();
+generateRocks();
 gameLoop();

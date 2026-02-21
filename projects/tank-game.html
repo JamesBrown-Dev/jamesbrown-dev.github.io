@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Tank Battle - A browser-based tank shooting game built with HTML Canvas and JavaScript">
+    <title>Tank Battle | James Brown</title>
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="../project-styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="grain-overlay"></div>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">JB</a>
+            <ul class="nav-menu">
+                <li><a href="../index.html#about" class="nav-link">About</a></li>
+                <li><a href="../index.html#projects" class="nav-link">Projects</a></li>
+                <li><a href="../index.html#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Project Header -->
+    <section class="project-detail-header">
+        <div class="container">
+            <div class="project-header-content">
+                <span class="project-category">Browser Game / JavaScript</span>
+                <h1 class="project-detail-title">Tank Battle</h1>
+                <p class="project-tagline">
+                    A top-down tank shooter built entirely with HTML Canvas and vanilla JavaScript. Survive waves of enemy tanks, earn money, and upgrade your tank to last as long as possible.
+                </p>
+
+                <div class="project-meta-info">
+                    <div class="meta-item">
+                        <span class="meta-label">Timeline</span>
+                        <span class="meta-value">Ongoing</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Role</span>
+                        <span class="meta-value">Solo Developer</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Status</span>
+                        <span class="meta-value">In Development</span>
+                    </div>
+                </div>
+
+                <div class="project-actions">
+                    <a href="tank-game/index.html" class="btn btn-primary">Play Game</a>
+                    <a href="https://github.com/jamesbrown-dev/jamesbrown-dev.github.io" target="_blank" class="btn btn-secondary">View Code</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Content -->
+    <section class="project-content">
+        <div class="container">
+            <div class="project-main">
+
+                <!-- Overview -->
+                <div class="content-section">
+                    <h2 class="section-heading">Project Overview</h2>
+                    <p class="content-text">
+                        Tank Battle is a browser-based top-down shooter where you control a tank using WASD to move and the mouse to aim and fire. Enemy tanks spawn from the edges of the map and hunt you down — you need to destroy them before they destroy you.
+                    </p>
+                    <p class="content-text">
+                        As kills stack up, enemies grow faster and tougher, and a second type of enemy — the Sniper — begins to appear. Snipers keep their distance, leading shots to predict your movement. Killing enemies earns money which can be spent on upgrades between waves.
+                    </p>
+                </div>
+
+                <!-- Tech Stack -->
+                <div class="content-section">
+                    <h2 class="section-heading">Technologies Used</h2>
+                    <div class="tech-stack-grid">
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🎨</div>
+                            <div class="tech-name">HTML Canvas 2D</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">⚡</div>
+                            <div class="tech-name">Vanilla JavaScript</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🎮</div>
+                            <div class="tech-name">requestAnimationFrame</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🖱️</div>
+                            <div class="tech-name">Mouse & Keyboard Input</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">💅</div>
+                            <div class="tech-name">CSS</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🧮</div>
+                            <div class="tech-name">2D Vector Maths</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Key Features -->
+                <div class="content-section">
+                    <h2 class="section-heading">Key Features</h2>
+                    <ul class="features-list">
+                        <li><strong>Two Enemy Types:</strong> Standard tanks that strafe and close in, and Snipers that hold range and lead shots based on your velocity.</li>
+                        <li><strong>Upgrade Shop:</strong> Spend earned money on movement speed, turret speed, bullet speed, fire rate, max health, and bullet damage — all upgradeable across multiple tiers.</li>
+                        <li><strong>Escalating Difficulty:</strong> Enemy speed and health scale with kill count. Double spawns begin after kill 7, and the spawn interval tightens over time.</li>
+                        <li><strong>Particle Effects:</strong> Explosion particles on kills, impact sparks on bullet hits, muzzle flash on every shot, and a red vignette when the player takes damage.</li>
+                        <li><strong>Crate Drops:</strong> Heal and money crates spawn periodically across the map to give you a fighting chance.</li>
+                        <li><strong>Spawn Indicators:</strong> Edge arrows warn you where the next enemy will arrive, pulsing faster as the spawn timer runs down.</li>
+                        <li><strong>Track Marks:</strong> All tanks leave fading tread marks on the ground as they move.</li>
+                    </ul>
+                </div>
+
+                <!-- What I Learned -->
+                <div class="content-section">
+                    <h2 class="section-heading">What I Learned</h2>
+                    <div class="learnings-grid">
+                        <div class="learning-card">
+                            <div class="learning-icon">🔄</div>
+                            <h3 class="learning-title">Game Loop Architecture</h3>
+                            <p class="learning-text">
+                                Built a delta-time driven game loop using requestAnimationFrame, keeping all movement and timers frame-rate independent regardless of rendering speed.
+                            </p>
+                        </div>
+                        <div class="learning-card">
+                            <div class="learning-icon">🤖</div>
+                            <h3 class="learning-title">Enemy AI</h3>
+                            <p class="learning-text">
+                                Implemented a state machine for enemy behaviour (approach, strafe, retreat, hold) and predictive shot-leading for sniper enemies using velocity-based target prediction.
+                            </p>
+                        </div>
+                        <div class="learning-card">
+                            <div class="learning-icon">📐</div>
+                            <h3 class="learning-title">2D Collision & Maths</h3>
+                            <p class="learning-text">
+                                Used rotated rectangle collision detection by transforming bullet positions into local tank space, and applied lerp-based smooth acceleration for natural tank movement.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Navigation -->
+    <nav class="project-nav">
+        <div class="container">
+            <div class="project-nav-content">
+                <div class="nav-project prev">
+                    <a href="vehicle-network-simulation.html">← Vehicle Network Simulation</a>
+                </div>
+
+                <div class="back-to-projects">
+                    <a href="../index.html#projects">← Back to All Projects</a>
+                </div>
+
+                <div class="nav-project next">
+                    <!-- Next project -->
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 James Brown. Built with passion and caffeine ☕</p>
+            <p class="footer-note">
+                <a href="../index.html">← Back to Portfolio</a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="../script.js"></script>
+</body>
+</html>
