@@ -1246,12 +1246,12 @@ function drawCrates() {
 function generateRocks() {
     rocks.length = 0;
     let attempts = 0;
-    while (rocks.length < 3 && attempts < 300) {
+    while (rocks.length < 5 && attempts < 300) {
         attempts++;
         const r = 22 + Math.random() * 16; // radius 22–38px
-        const x = 110 + Math.random() * (canvas.width  - 220);
-        const y = 110 + Math.random() * (canvas.height - 220);
-        if (Math.hypot(x - 550, y - 375) < 185) continue; // clear of player start
+        const x = 110 + Math.random() * (canvas.width  - 150);
+        const y = 110 + Math.random() * (canvas.height - 150);
+        if (Math.hypot(x - 550, y - 375) < 20) continue; // clear of player start
         let overlaps = false;
         for (const rock of rocks) {
             if (Math.hypot(x - rock.x, y - rock.y) < r + rock.r + 20) { overlaps = true; break; }
