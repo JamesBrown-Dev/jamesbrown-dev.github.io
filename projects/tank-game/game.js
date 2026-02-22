@@ -109,6 +109,7 @@ const maxLiveEnemies = 5;  // cap so the screen doesn't get overrun
 let nextSpawn = null;      // pre-picked spawn position shown as an edge indicator
 let nextSpawn2 = null;     // second spawn position when a double spawn is pre-rolled
 let playerHitTimer = 0;    // drives the red vignette flash when the player is hit
+const floatingTexts = [];  // pickup popups that rise and fade over a crate collection
 
 class Player {
     constructor(x, y) {
@@ -617,6 +618,7 @@ class Crate {
         this.r = 14;
         this.progress = 0; // 0→1 spawn animation
         this.collected = false;
+        this.destroyed = false;
     }
 
     // animates the spawn pop-in and checks if the player has walked over it
@@ -631,10 +633,23 @@ class Crate {
                 if (this.type === 'heal') {
                     player.health = Math.min(player.health + 1, player.maxHealth);
                     updateHealthBar();
+                    spawnFloatingText(this.x, this.y, '+', '#ff5555');
                 } else {
-                    money += 25 + Math.floor(Math.random() * 26); // £25–50
+                    const earned = 25 + Math.floor(Math.random() * 26); // £25–50
+                    money += earned;
+                    spawnFloatingText(this.x, this.y, `£${earned}`, '#f0c040');
                 }
                 updateUpgradesUI();
+            }
+            // enemy tanks driving over a crate crush it
+            if (!this.destroyed) {
+                for (const enemy of enemies) {
+                    if (!enemy.dead && Math.hypot(enemy.x - this.x, enemy.y - this.y) < this.r + 20) {
+                        this.destroyed = true;
+                        spawnExplosion(this.x, this.y, 'crate');
+                        break;
+                    }
+                }
             }
         }
     }
@@ -752,6 +767,10 @@ function spawnExplosion(x, y, type) {
         count = 7;
         colors = ['#ffdd00', '#ff8800', '#ffffff', '#ffaa00'];
         speedRange = [40, 130]; sizeRange = [1.5, 3]; lifetime = [0.08, 0.2];
+    } else if (type === 'crate') {
+        count = 16;
+        colors = ['#9b7a1a', '#5a3e08', '#c49a22', '#e8c060', '#7a5c10'];
+        speedRange = [60, 200]; sizeRange = [2, 6]; lifetime = [0.25, 0.55];
     } else { // player
         count = 25;
         colors = ['#5a8f3c', '#ff8800', '#ff4400', '#ffdd00', '#3d6b1f'];
@@ -798,6 +817,42 @@ function drawExplosions() {
     }
     ctx.globalAlpha = 1;
 }
+
+// spawns a floating text label that rises and fades — used for crate pickups
+function spawnFloatingText(x, y, text, color) {
+    floatingTexts.push({ x, y, text, color, life: 1.0, maxLife: 1.0 });
+}
+
+function updateFloatingTexts(dt) {
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        floatingTexts[i].y -= 55 * dt; // rises upward
+        floatingTexts[i].life -= dt;
+        if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
+    }
+}
+
+function drawFloatingTexts() {
+    for (const ft of floatingTexts) {
+        const t = ft.life / ft.maxLife;            // 1 → 0 as it fades
+        const scale = 1 + 0.5 * (1 - t);           // grows slightly as it rises
+        const alpha = t < 0.4 ? t / 0.4 : 1;       // fade out in last 40% of life
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(ft.x, ft.y);
+        ctx.scale(scale, scale);
+        ctx.font = 'bold 22px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // dark outline for readability
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 4;
+        ctx.strokeText(ft.text, 0, 0);
+        ctx.fillStyle = ft.color;
+        ctx.fillText(ft.text, 0, 0);
+        ctx.restore();
+    }
+}
+
 let crateSpawnTimer = 10;
 const maxCrates = 3;
 
@@ -1137,6 +1192,7 @@ function restartGame() {
     trackMarks.length = 0;
     crates.length = 0;
     explosions.length = 0;
+    floatingTexts.length = 0;
     nextSpawn = null;
     nextSpawn2 = null;
     playerHitTimer = 0;
@@ -1183,14 +1239,23 @@ function flashHealthBar() {
 }
 
 // updates the HTML health bar width and colour to reflect the player's current health
+// linearly interpolates between two RGB triples
+function lerpColor(a, b, t) {
+    return `rgb(${Math.round(a[0]+(b[0]-a[0])*t)},${Math.round(a[1]+(b[1]-a[1])*t)},${Math.round(a[2]+(b[2]-a[2])*t)})`;
+}
+
 function updateHealthBar() {
     const pct = player.health / player.maxHealth;
-    document.getElementById('health-bar-fill').style.width = `${pct * 100}%`;
-    document.getElementById('health-text').textContent = `${player.health} / ${player.maxHealth}`;
     const fill = document.getElementById('health-bar-fill');
-    if (pct > 0.6) fill.style.background = '#5a8f3c';
-    else if (pct > 0.3) fill.style.background = '#c8a000';
-    else fill.style.background = '#b03020';
+    fill.style.width = `${pct * 100}%`;
+    // dark red → amber → green across the 0–1 health range
+    const red   = [107,  16,  16];
+    const amber = [200, 160,   0];
+    const green = [ 90, 143,  60];
+    fill.style.background = pct <= 0.5
+        ? lerpColor(red,   amber, pct * 2)
+        : lerpColor(amber, green, (pct - 0.5) * 2);
+    document.getElementById('health-text').textContent = `${player.health} / ${player.maxHealth}`;
 }
 
 // counts down the spawn timer and creates a new enemy when it expires, up to the live enemy cap
@@ -1221,19 +1286,25 @@ function updateCrates(dt) {
     if (crates.length < maxCrates) {
         crateSpawnTimer -= dt;
         if (crateSpawnTimer <= 0) {
-            let x, y, tries = 0;
-            do {
+            let x, y, tries = 0, valid = false;
+            while (!valid && tries < 30) {
+                tries++;
                 x = 80 + Math.random() * (canvas.width - 160);
                 y = 80 + Math.random() * (canvas.height - 160);
-                tries++;
-            } while (tries < 10 && Math.hypot(x - player.x, y - player.y) < 150);
+                if (Math.hypot(x - player.x, y - player.y) < 150) continue;
+                let onRock = false;
+                for (const rock of rocks) {
+                    if (Math.hypot(x - rock.x, y - rock.y) < rock.r + 20) { onRock = true; break; }
+                }
+                if (!onRock) valid = true;
+            }
             crates.push(new Crate(x, y, Math.random() < 0.5 ? 'heal' : 'money'));
             crateSpawnTimer = 12 + Math.random() * 8; // next crate in 12–20s
         }
     }
     for (let i = crates.length - 1; i >= 0; i--) {
         crates[i].update(dt);
-        if (crates[i].collected) crates.splice(i, 1);
+        if (crates[i].collected || crates[i].destroyed) crates.splice(i, 1);
     }
 }
 
@@ -1287,6 +1358,34 @@ function checkBulletRockCollisions() {
     }
 }
 
+// removes any bullet (player or enemy) that hits a crate, destroying it with a splinter burst
+function checkBulletCrateCollisions() {
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        for (let j = crates.length - 1; j >= 0; j--) {
+            const c = crates[j];
+            if (c.progress < 1 || c.destroyed) continue;
+            if (Math.hypot(bullets[i].x - c.x, bullets[i].y - c.y) < c.r + 3) {
+                spawnExplosion(c.x, c.y, 'crate');
+                c.destroyed = true;
+                bullets.splice(i, 1);
+                break;
+            }
+        }
+    }
+    for (let i = enemyBullets.length - 1; i >= 0; i--) {
+        for (let j = crates.length - 1; j >= 0; j--) {
+            const c = crates[j];
+            if (c.progress < 1 || c.destroyed) continue;
+            if (Math.hypot(enemyBullets[i].x - c.x, enemyBullets[i].y - c.y) < c.r + 3) {
+                spawnExplosion(c.x, c.y, 'crate');
+                c.destroyed = true;
+                enemyBullets.splice(i, 1);
+                break;
+            }
+        }
+    }
+}
+
 // main loop — called once per frame by requestAnimationFrame, calculates delta time and runs all updates and draws
 function gameLoop(timestamp) {
     // timestamp is provided by requestAnimationFrame in milliseconds
@@ -1300,11 +1399,13 @@ function gameLoop(timestamp) {
     updateBullets(deltaTime);
     updateEnemyBullets(deltaTime);
     checkBulletRockCollisions();
+    checkBulletCrateCollisions();
     checkBulletEnemyCollisions();
     updateTrackMarks(deltaTime);
     updateSpawning(deltaTime);
     updateCrates(deltaTime);
     updateExplosions(deltaTime);
+    updateFloatingTexts(deltaTime);
     if (playerHitTimer > 0) playerHitTimer -= deltaTime;
     for (const enemy of enemies) enemy.update(deltaTime);
     drawTrackMarks();
@@ -1315,13 +1416,24 @@ function gameLoop(timestamp) {
     drawBullets();
     drawEnemyBullets();
     drawExplosions();
+    drawFloatingTexts();
     drawHitVignette();
     drawSpawnIndicator();
     if (!gameOver) requestAnimationFrame(gameLoop);
+}
+
+// hides the start screen and begins the game loop
+function startGame() {
+    document.getElementById('start-screen').classList.remove('visible');
+    requestAnimationFrame(gameLoop);
 }
 
 initUpgradesUI();
 updateUpgradesUI();
 updateHealthBar();
 generateRocks();
-gameLoop();
+
+// draw a static map preview behind the start screen
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+drawBackground();
+drawRocks();
