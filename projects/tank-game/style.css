@@ -303,6 +303,29 @@ canvas {
     cursor: default;
 }
 
+#back-link {
+    position: fixed;
+    top: 14px;
+    left: 16px;
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #1a1a1a;
+    background: #f8f6f3;
+    text-decoration: none;
+    border: 2px solid #e0dcd5;
+    padding: 6px 14px;
+    border-radius: 8px;
+    transition: background 0.2s, border-color 0.2s;
+    z-index: 100;
+}
+
+#back-link:hover {
+    background: #f0ede8;
+    border-color: #c8c4be;
+}
+
 @keyframes hudHitFlash {
     0%   { background: rgba(255, 80, 0, 0.55); }
     100% { background: #1a1a1a; }
