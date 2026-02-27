@@ -1,0 +1,131 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #0d0d0d;
+    overflow: hidden;
+}
+
+canvas {
+    display: block;
+}
+
+/* ── lobby ───────────────────────────────────────────────── */
+
+#lobby {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d0d0d;
+    z-index: 10;
+}
+
+#lobby-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+}
+
+#lobby-title {
+    font-family: monospace;
+    font-size: 64px;
+    font-weight: bold;
+    letter-spacing: 12px;
+    color: #cc2020;
+    text-shadow: 0 0 40px rgba(200, 30, 30, 0.4);
+}
+
+#lobby-buttons {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+.lobby-btn {
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 3px;
+    color: #ccc;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    padding: 10px 32px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+    width: 100%;
+}
+
+.lobby-btn:hover {
+    border-color: #cc2020;
+    color: #fff;
+}
+
+#join-row {
+    display: flex;
+    gap: 8px;
+}
+
+#code-input {
+    font-family: monospace;
+    font-size: 14px;
+    letter-spacing: 2px;
+    background: #111;
+    border: 1px solid #444;
+    color: #ddd;
+    padding: 10px 14px;
+    outline: none;
+    width: 200px;
+}
+
+#code-input:focus {
+    border-color: #666;
+}
+
+/* shown once host has their peer ID */
+#code-display {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+}
+
+.code-label {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: #555;
+}
+
+#code-text {
+    font-family: monospace;
+    font-size: 22px;
+    font-weight: bold;
+    letter-spacing: 4px;
+    color: #eee;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 10px 24px;
+}
+
+.code-hint {
+    font-family: monospace;
+    font-size: 11px;
+    color: #444;
+    letter-spacing: 1px;
+}
+
+#lobby-status {
+    font-family: monospace;
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: #666;
+    min-height: 18px;
+}

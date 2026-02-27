@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- lobby shown before the game starts -->
+    <div id="lobby">
+        <div id="lobby-box">
+            <h1 id="lobby-title">FLATLINE</h1>
+
+            <div id="lobby-buttons">
+                <button class="lobby-btn" onclick="hostGame()">HOST GAME</button>
+                <div id="join-row">
+                    <input id="code-input" type="text" placeholder="Room code" spellcheck="false" />
+                    <button class="lobby-btn" onclick="joinGame()">JOIN</button>
+                </div>
+            </div>
+
+            <!-- shown to the host once their peer ID is ready -->
+            <div id="code-display">
+                <p class="code-label">YOUR ROOM CODE</p>
+                <p id="code-text"></p>
+                <p class="code-hint">Share this with your friend</p>
+            </div>
+
+            <p id="lobby-status"></p>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/peerjs@1/dist/peerjs.min.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
