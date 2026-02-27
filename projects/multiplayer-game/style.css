@@ -72,6 +72,24 @@ canvas {
     gap: 8px;
 }
 
+#name-input {
+    font-family: monospace;
+    font-size: 14px;
+    letter-spacing: 2px;
+    background: #111;
+    border: 1px solid #444;
+    color: #ddd;
+    padding: 10px 14px;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+}
+
+#name-input:focus {
+    border-color: #666;
+}
+
 #code-input {
     font-family: monospace;
     font-size: 14px;

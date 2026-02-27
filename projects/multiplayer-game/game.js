@@ -34,9 +34,11 @@ const player = {
 // 0 = slot 1, etc. — only slot 0 (pistol) is defined for now
 // ─── weapon definitions ───────────────────────────────────────────────────────
 const WEAPON_DEFS = [
-    { id: 0, name: 'pistol',  magSize: 8, reloadTime: 1.5, cooldown: 0.25, pellets: 1, spread: 0,    cost: 0   },
-    { id: 1, name: 'shotgun', magSize: 2, reloadTime: 2.2, cooldown: 0.9,  pellets: 7, spread: 0.28, cost: 200 },
+    { id: 0, name: 'pistol',  magSize: 8,  reloadTime: 1.5, cooldown: 0.25, pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 700, aoeRadius: 0  },
+    { id: 1, name: 'shotgun', magSize: 2,  reloadTime: 2.2, cooldown: 0.9,  pellets: 7, spread: 0.28, cost: 200, bulletSpeed: 700, aoeRadius: 0  },
+    { id: 2, name: 'raygun',  magSize: 12, reloadTime: 1.8, cooldown: 0.5,  pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 420, aoeRadius: 80 },
 ];
+const RAYGUN_AOE_DAMAGE = 3; // enough to insta-kill (ZOMBIE_HP = 2)
 const MAG_SIZE    = WEAPON_DEFS[0].magSize;  // kept for backward compat
 const RELOAD_TIME = WEAPON_DEFS[0].reloadTime;
 
@@ -69,14 +71,18 @@ const plankDebris   = []; // broken barricade pieces
 // holds the last state received from the other player
 let remotePeer = null;
 
+let localPlayerName = 'Player';
+
 let money = 0; // currency — to be used for future upgrades/purchases
 
 // ─── player health ────────────────────────────────────────────────────────────
 
 const PLAYER_MAX_HP = 100;
-let playerHp   = PLAYER_MAX_HP;
-let playerDead = false;
-const ZOMBIE_DPS    = 20;  // damage per second while in contact
+let playerHp        = PLAYER_MAX_HP;
+let playerDead      = false;
+let timeSinceDamage = 0; // seconds since last hit — regen starts after a delay
+const ZOMBIE_DPS    = 60;  // damage per second while in contact
+const HP_REGEN_RATE = 4;   // hp per second regenerated when not taking damage
 const ZOMBIE_RADIUS = 12;
 
 // ─── zombies & waves ──────────────────────────────────────────────────────────
@@ -364,20 +370,32 @@ function setupConnection() {
         } else if (data.type === 'shoot') {
             // spawn the other player's bullet(s) on our end
             const batch = data.bullets || [{ x: data.x, y: data.y, vx: data.vx, vy: data.vy }];
-            for (const b of batch) remoteBullets.push({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, life: BULLET_LIFE });
+            for (const b of batch) remoteBullets.push({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, life: BULLET_LIFE, weaponId: b.weaponId ?? 0 });
         } else if (data.type === 'zombies') {
             // joiner receives zombie positions + wave info from host
             remoteZombies = data.zombies;
+            const prevWave = wave;
             wave      = data.wave;
             waveDelay = data.waveDelay;
+            // reset mystery box for joiner when a new wave starts (mirrors host-side reset)
+            if (data.wave > prevWave) {
+                mysteryBoxOpened = false;
+                if (playerDead) { playerDead = false; playerHp = PLAYER_MAX_HP; }
+            }
             if (data.windowPlanks) data.windowPlanks.forEach((p, i) => { windows[i].planks = p; });
         } else if (data.type === 'zombieHit') {
             // host receives a hit report from joiner — apply damage to the zombie
             const idx = zombies.findIndex(z => z.id === data.id);
             if (idx !== -1) {
                 zombies[idx].hp--;
-                if (zombies[idx].hp <= 0) { zombies.splice(idx, 1); money += ZOMBIE_KILL_REWARD; }
+                if (zombies[idx].hp <= 0) {
+                    zombies.splice(idx, 1);
+                    // send kill reward back to the joiner who landed the killing blow
+                    if (conn && conn.open) conn.send({ type: 'killReward', amount: ZOMBIE_KILL_REWARD });
+                }
             }
+        } else if (data.type === 'killReward') {
+            money += data.amount;
         } else if (data.type === 'addPlank') {
             // either player repaired a barricade — apply on this end
             // host also applies it (joiner sent it); joiner receives it back from host broadcast OR host repairs
@@ -385,6 +403,12 @@ function setupConnection() {
         } else if (data.type === 'plankDebris') {
             // host tells joiner to spawn debris when a zombie destroys a plank
             spawnPlankDebris(windows[data.windowIndex], data.outDir);
+        } else if (data.type === 'zombieAoE') {
+            // joiner's ray gun hit — apply AoE without rewarding host, send kills back to joiner
+            const kills = spawnRaygunExplosion(data.x, data.y, false);
+            if (kills > 0 && conn && conn.open) {
+                conn.send({ type: 'killReward', amount: ZOMBIE_KILL_REWARD * kills });
+            }
         }
     });
 
@@ -399,6 +423,8 @@ function setStatus(msg) {
 }
 
 function startGame() {
+    const nameEl = document.getElementById('name-input');
+    localPlayerName = (nameEl && nameEl.value.trim()) || 'Player';
     document.getElementById('lobby').style.display = 'none';
     requestAnimationFrame(gameLoop);
 }
@@ -444,10 +470,11 @@ canvas.addEventListener('click', () => {
     const bx = player.x + Math.cos(player.angle) * GUN_TIP_X - Math.sin(player.angle) * GUN_TIP_Y;
     const by = player.y + Math.sin(player.angle) * GUN_TIP_X + Math.cos(player.angle) * GUN_TIP_Y;
 
+    const spd = wDef.bulletSpeed || BULLET_SPEED;
     const newBullets = [];
     for (let i = 0; i < wDef.pellets; i++) {
         const a = player.angle + (Math.random() - 0.5) * wDef.spread;
-        newBullets.push({ x: bx, y: by, vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED, life: BULLET_LIFE });
+        newBullets.push({ x: bx, y: by, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: BULLET_LIFE, weaponId: wDef.id });
     }
     bullets.push(...newBullets);
     magAmmo--;
@@ -455,7 +482,7 @@ canvas.addEventListener('click', () => {
 
     // tell the other player about these bullets
     if (conn && conn.open) {
-        conn.send({ type: 'shoot', bullets: newBullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy })) });
+        conn.send({ type: 'shoot', bullets: newBullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, weaponId: b.weaponId })) });
     }
 });
 
@@ -543,13 +570,45 @@ function updatePlayer(dt) {
     for (const wall of walls) resolveCircleRect(player, PLAYER_RADIUS, wall);
     for (const win of windows) resolveCircleRect(player, PLAYER_RADIUS, win);
 
+    // health regeneration — kicks in 4s after last damage
+    timeSinceDamage += dt;
+    if (timeSinceDamage > 4 && playerHp > 0 && playerHp < PLAYER_MAX_HP) {
+        playerHp = Math.min(PLAYER_MAX_HP, playerHp + HP_REGEN_RATE * dt);
+    }
+
     // send position + current weapon to the other player
     if (conn && conn.open) {
-        conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, dead: playerDead });
+        conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, dead: playerDead, name: localPlayerName });
     }
 }
 
 // dirAngle: direction particles fly toward (use bullet's opposite angle for impact spray)
+// rewardMoney=false when called from a joiner's AoE on the host (joiner gets rewards instead)
+function spawnRaygunExplosion(x, y, rewardMoney = true) {
+    spawnParticles(x, y, '#40ff60', 20);
+    spawnParticles(x, y, '#a0ffb0', 10);
+
+    const radius = WEAPON_DEFS[2].aoeRadius;
+    let kills = 0;
+
+    if (shouldSimulateZombies()) {
+        for (let i = zombies.length - 1; i >= 0; i--) {
+            if (Math.hypot(zombies[i].x - x, zombies[i].y - y) < radius) {
+                zombies[i].hp -= RAYGUN_AOE_DAMAGE;
+                if (zombies[i].hp <= 0) {
+                    zombies.splice(i, 1);
+                    if (rewardMoney) money += ZOMBIE_KILL_REWARD;
+                    kills++;
+                }
+            }
+        }
+    } else {
+        // joiner: tell host to handle the AoE damage
+        if (conn && conn.open) conn.send({ type: 'zombieAoE', x, y, radius });
+    }
+    return kills;
+}
+
 function spawnParticles(x, y, color, count, dirAngle) {
     const spread = Math.PI * 0.6; // ±54° cone
     for (let i = 0; i < count; i++) {
@@ -584,6 +643,17 @@ const SHOTGUN_PICKUP = (() => {
 })();
 
 let shotgunBuyProgress = 0; // 0..1 while holding F near pickup
+
+// ─── mystery box ──────────────────────────────────────────────────────────────
+const MYSTERY_BOX = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    return { x: b.x + b.w - t - 52, y: b.y + b.h - t - 52, w: 32, h: 32, cost: 200 };
+})();
+
+let mysteryBoxProgress = 0;  // 0..1 hold-F progress
+let mysteryBoxOpened   = false; // resets each wave
+let mysteryBoxAnim     = 0;  // 0..1 pulsing glow timer
+let mysteryBoxResult   = null; // { text, timer } — shown briefly after opening
 
 function applyAddPlank(winIndex) {
     const win = windows[winIndex];
@@ -632,6 +702,91 @@ function updateBarricadeRepair(dt) {
             win.buildProgress = Math.max(0, win.buildProgress - dt * 3);
         }
     }
+}
+
+function updateMysteryBox(dt) {
+    mysteryBoxAnim = (mysteryBoxAnim + dt * 2) % (Math.PI * 2); // pulse timer
+
+    // tick result overlay
+    if (mysteryBoxResult) {
+        mysteryBoxResult.timer -= dt;
+        if (mysteryBoxResult.timer <= 0) mysteryBoxResult = null;
+    }
+
+    if (mysteryBoxOpened) return;
+    const mb   = MYSTERY_BOX;
+    const cx   = mb.x + mb.w / 2;
+    const cy   = mb.y + mb.h / 2;
+    const dist = Math.hypot(player.x - cx, player.y - cy);
+    const holding = keys['f'] || keys['F'];
+
+    if (dist < BARRICADE_RANGE && holding) {
+        mysteryBoxProgress = Math.min(1, mysteryBoxProgress + dt / 1.5);
+        if (mysteryBoxProgress >= 1) {
+            mysteryBoxProgress = 0;
+            if (money < mb.cost) return;
+            money -= mb.cost;
+            mysteryBoxOpened = true;
+            if (Math.random() < 0.5) {
+                // ray gun — find first empty slot or replace current
+                let targetSlot = inventory.indexOf(-1);
+                if (targetSlot === -1) targetSlot = currentWeapon;
+                inventory[targetSlot]  = 2;
+                savedAmmo[targetSlot]  = WEAPON_DEFS[2].magSize;
+                switchWeapon(targetSlot);
+                mysteryBoxResult = { text: 'RAY GUN!', color: '#40ff60', timer: 2.5 };
+            } else {
+                // teddy bear — does nothing
+                mysteryBoxResult = { text: 'TEDDY BEAR!', color: '#c8843a', timer: 2.5 };
+            }
+        }
+    } else {
+        mysteryBoxProgress = Math.max(0, mysteryBoxProgress - dt * 3);
+    }
+}
+
+function drawMysteryBox() {
+    const mb   = MYSTERY_BOX;
+    const cx   = mb.x + mb.w / 2;
+    const cy   = mb.y + mb.h / 2;
+    const glow = 0.5 + 0.5 * Math.sin(mysteryBoxAnim);
+
+    ctx.save();
+
+    if (!mysteryBoxOpened) {
+        // pulsing green glow
+        const glowR = mb.w * 0.9 + glow * 8;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+        grad.addColorStop(0, `rgba(60,255,80,${0.25 * glow})`);
+        grad.addColorStop(1, 'rgba(60,255,80,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+    }
+
+    // box body
+    ctx.fillStyle = mysteryBoxOpened ? '#1a1a1a' : '#1a2e1a';
+    ctx.fillRect(mb.x, mb.y, mb.w, mb.h);
+    ctx.strokeStyle = mysteryBoxOpened ? '#333' : `rgba(60,220,80,${0.5 + 0.5 * glow})`;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(mb.x, mb.y, mb.w, mb.h);
+
+    // ? or empty label
+    ctx.font = `bold ${mysteryBoxOpened ? 10 : 18}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = mysteryBoxOpened ? '#333' : `rgba(80,255,100,${0.7 + 0.3 * glow})`;
+    ctx.fillText(mysteryBoxOpened ? 'EMPTY' : '?', cx, cy);
+    ctx.textBaseline = 'alphabetic';
+
+    // buy progress bar
+    if (!mysteryBoxOpened && mysteryBoxProgress > 0) {
+        ctx.fillStyle = '#222';
+        ctx.fillRect(mb.x, mb.y + mb.h + 2, mb.w, 3);
+        ctx.fillStyle = '#40e060';
+        ctx.fillRect(mb.x, mb.y + mb.h + 2, mb.w * mysteryBoxProgress, 3);
+    }
+
+    ctx.restore();
 }
 
 function updateWeaponPickup(dt) {
@@ -753,8 +908,10 @@ function updateBullets(dt) {
             bullets.splice(i, 1);
             continue;
         }
+        const isRaygun = b.weaponId === 2;
         if (bulletHitsWall(b)) {
-            spawnParticles(b.x, b.y, '#f5e642', 8, Math.atan2(b.vy, b.vx) + Math.PI);
+            if (isRaygun) spawnRaygunExplosion(b.x, b.y);
+            else spawnParticles(b.x, b.y, '#f5e642', 8, Math.atan2(b.vy, b.vx) + Math.PI);
             bullets.splice(i, 1);
             continue;
         }
@@ -765,8 +922,12 @@ function updateBullets(dt) {
                 const z = zombies[j];
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < ZOMBIE_RADIUS * ZOMBIE_RADIUS) {
-                    z.hp--;
-                    if (z.hp <= 0) { zombies.splice(j, 1); money += ZOMBIE_KILL_REWARD; }
+                    if (isRaygun) {
+                        spawnRaygunExplosion(b.x, b.y);
+                    } else {
+                        z.hp--;
+                        if (z.hp <= 0) { zombies.splice(j, 1); money += ZOMBIE_KILL_REWARD; }
+                    }
                     zombieHit = true;
                     break;
                 }
@@ -776,14 +937,15 @@ function updateBullets(dt) {
                 const z = remoteZombies[j];
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < ZOMBIE_RADIUS * ZOMBIE_RADIUS) {
-                    if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id });
+                    if (isRaygun) spawnRaygunExplosion(b.x, b.y);
+                    else if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id });
                     zombieHit = true;
                     break;
                 }
             }
         }
         if (zombieHit) {
-            spawnParticles(b.x, b.y, '#cc2020', 8, Math.atan2(b.vy, b.vx) + Math.PI);
+            if (!isRaygun) spawnParticles(b.x, b.y, '#cc2020', 8, Math.atan2(b.vy, b.vx) + Math.PI);
             bullets.splice(i, 1);
             continue;
         }
@@ -898,6 +1060,7 @@ function updateZombies(dt) {
             spawnTimer  = 0;
             // revive dead players at the start of each new wave
             if (playerDead) { playerDead = false; playerHp = PLAYER_MAX_HP; }
+            mysteryBoxOpened = false;
         }
     }
 
@@ -990,6 +1153,7 @@ function updateZombies(dt) {
                 const pdx = z.x - player.x, pdy = z.y - player.y;
                 if (pdx * pdx + pdy * pdy < (ZOMBIE_RADIUS + PLAYER_RADIUS) * (ZOMBIE_RADIUS + PLAYER_RADIUS)) {
                     playerHp = Math.max(0, playerHp - ZOMBIE_DPS * dt);
+                    timeSinceDamage = 0;
                     if (playerHp === 0) playerDead = true;
                 }
             }
@@ -1038,6 +1202,7 @@ function updateJoinerZombieDamage(dt) {
         const dx = z.x - player.x, dy = z.y - player.y;
         if (dx * dx + dy * dy < minDistSq) {
             playerHp = Math.max(0, playerHp - ZOMBIE_DPS * dt);
+            timeSinceDamage = 0;
             if (playerHp === 0) playerDead = true;
             break;
         }
@@ -1210,6 +1375,19 @@ function drawCharacter(x, y, angle, bodyColor, weapon) {
     ctx.restore();
 }
 
+function drawPlayerName(x, y, name, color) {
+    ctx.save();
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    const tw = ctx.measureText(name).width;
+    ctx.fillRect(x - tw / 2 - 3, y - 26, tw + 6, 13);
+    ctx.fillStyle = color;
+    ctx.fillText(name, x, y - 14);
+    ctx.restore();
+}
+
 function drawPlayer() {
     if (playerDead) {
         // draw flat grey corpse with red X eyes
@@ -1235,9 +1413,11 @@ function drawPlayer() {
             ctx.beginPath(); ctx.moveTo(ox + 1.5, oy - 1.5); ctx.lineTo(ox - 1.5, oy + 1.5); ctx.stroke();
         }
         ctx.restore();
+        drawPlayerName(player.x, player.y, localPlayerName, '#cc2020');
         return;
     }
     drawCharacter(player.x, player.y, player.angle, '#3a3a3a', currentWeapon);
+    drawPlayerName(player.x, player.y, localPlayerName, '#ddd');
 }
 
 function drawRemotePlayer() {
@@ -1262,22 +1442,31 @@ function drawRemotePlayer() {
             ctx.beginPath(); ctx.moveTo(ox + 1.5, oy - 1.5); ctx.lineTo(ox - 1.5, oy + 1.5); ctx.stroke();
         }
         ctx.restore();
+        drawPlayerName(remotePeer.x, remotePeer.y, remotePeer.name ?? 'Player', '#cc2020');
         return;
     }
     drawCharacter(remotePeer.x, remotePeer.y, remotePeer.angle, '#8b2020', remotePeer.weapon ?? 0);
+    drawPlayerName(remotePeer.x, remotePeer.y, remotePeer.name ?? 'Player', '#e07070');
 }
 
 function drawBullets() {
-    ctx.fillStyle = '#f5e642';
-    for (const b of bullets) {
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
-        ctx.fill();
-    }
-    for (const b of remoteBullets) {
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
-        ctx.fill();
+    for (const b of [...bullets, ...remoteBullets]) {
+        if (b.weaponId === 2) {
+            // ray gun — glowing green orb
+            ctx.save();
+            ctx.shadowColor = '#40ff60';
+            ctx.shadowBlur  = 8;
+            ctx.fillStyle   = '#80ffaa';
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        } else {
+            ctx.fillStyle = '#f5e642';
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
 }
 
@@ -1376,6 +1565,28 @@ function drawShotgunIcon(cx, cy) {
     ctx.restore();
 }
 
+function drawRaygunIcon(cx, cy) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    // handle/grip
+    ctx.fillStyle = '#3a2a6a';
+    ctx.fillRect(-12, -1, 7, 7);
+    // body
+    ctx.fillStyle = '#5a3aaa';
+    ctx.fillRect(-5, -4, 10, 9);
+    // barrel
+    ctx.fillStyle = '#8860dd';
+    ctx.fillRect(5, -2, 12, 5);
+    // emitter glow
+    ctx.shadowColor = '#40ff60';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = '#80ffaa';
+    ctx.beginPath();
+    ctx.arc(18, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
 function drawHudPrompt(text) {
     const sx = canvas.width / 2;
     const sy = canvas.height / 2 - 60;
@@ -1391,6 +1602,20 @@ function drawHudPrompt(text) {
 }
 
 function drawBarricadePrompt() {
+    // mystery box prompt
+    if (!mysteryBoxOpened) {
+        const mb  = MYSTERY_BOX;
+        const mcx = mb.x + mb.w / 2, mcy = mb.y + mb.h / 2;
+        if (Math.hypot(player.x - mcx, player.y - mcy) < BARRICADE_RANGE) {
+            const canAfford = money >= mb.cost;
+            const label = canAfford
+                ? `[F] Mystery Box  £${mb.cost}`
+                : `Mystery Box  £${mb.cost}  (need £${mb.cost - money} more)`;
+            drawHudPrompt(label);
+            return;
+        }
+    }
+
     // shotgun buy prompt takes priority if near pickup
     const sp   = SHOTGUN_PICKUP;
     const scx  = sp.x + sp.w / 2;
@@ -1446,6 +1671,7 @@ function drawHotbar() {
         const wid = inventory[i];
         if (wid === 0) drawPistolIcon( x + slotSize / 2, y + slotSize / 2 + 2);
         if (wid === 1) drawShotgunIcon(x + slotSize / 2, y + slotSize / 2 + 2);
+        if (wid === 2) drawRaygunIcon( x + slotSize / 2, y + slotSize / 2 + 2);
     }
 }
 
@@ -1600,6 +1826,22 @@ function drawWaveHUD() {
     ctx.textAlign = 'left';
 }
 
+function drawMysteryBoxResult() {
+    if (!mysteryBoxResult) return;
+    const t = mysteryBoxResult.timer / 2.5; // 1→0 as it fades
+    const alpha = Math.min(1, t * 4); // quick fade in, slow fade out
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 32px monospace';
+    ctx.fillStyle = mysteryBoxResult.color;
+    ctx.shadowColor = mysteryBoxResult.color;
+    ctx.shadowBlur = 18;
+    ctx.fillText(mysteryBoxResult.text, canvas.width / 2, canvas.height / 2 - 60);
+    ctx.restore();
+}
+
 // ─── loop ─────────────────────────────────────────────────────────────────────
 
 let lastTime = 0;
@@ -1614,6 +1856,7 @@ function gameLoop(timestamp) {
     updatePlankDebris(dt);
     updateBarricadeRepair(dt);
     updateWeaponPickup(dt);
+    updateMysteryBox(dt);
     updateZombies(dt);
     updateJoinerZombieDamage(dt);
     updateCamera();
@@ -1627,6 +1870,7 @@ function gameLoop(timestamp) {
     drawFloor();
     drawWorldBorder();
     drawBuilding();
+    drawMysteryBox();
     drawWeaponPickup();
     drawPlankDebris();
     drawZombies();
@@ -1644,6 +1888,7 @@ function gameLoop(timestamp) {
     drawHealthBar();
     drawWaveHUD();
     drawBarricadePrompt();
+    drawMysteryBoxResult();
 
     requestAnimationFrame(gameLoop);
 }
