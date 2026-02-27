@@ -36,7 +36,7 @@ const player = {
 const WEAPON_DEFS = [
     { id: 0, name: 'pistol',  magSize: 8,  reloadTime: 1.5, cooldown: 0.25, pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 700, aoeRadius: 0  },
     { id: 1, name: 'shotgun', magSize: 2,  reloadTime: 2.2, cooldown: 0.9,  pellets: 7, spread: 0.28, cost: 200, bulletSpeed: 700, aoeRadius: 0  },
-    { id: 2, name: 'raygun',  magSize: 12, reloadTime: 1.8, cooldown: 0.5,  pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 420, aoeRadius: 80 },
+    { id: 2, name: 'raygun',  magSize: 12, reloadTime: 1.8, cooldown: 0.5,  pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 900, aoeRadius: 80 },
 ];
 const RAYGUN_AOE_DAMAGE = 3; // enough to insta-kill (ZOMBIE_HP = 2)
 const MAG_SIZE    = WEAPON_DEFS[0].magSize;  // kept for backward compat
@@ -67,6 +67,7 @@ const bullets       = []; // this player's bullets
 const remoteBullets = []; // other player's bullets
 const particles     = []; // visual hit effects
 const plankDebris   = []; // broken barricade pieces
+const groundMarks   = []; // blood smears and scorch marks
 
 // holds the last state received from the other player
 let remotePeer = null;
@@ -114,7 +115,7 @@ class Zombie {
         this.y            = y;
         this.targetWindow = targetWindow;
         this.state        = 'toWindow'; // 'toWindow' | 'attacking' | 'hunting'
-        this.hp           = ZOMBIE_HP;
+        this.hp           = ZOMBIE_HP + Math.floor(wave / 5); // +1 HP every 5 waves
         this.speed        = ZOMBIE_WAVE_SPEED(wave);
         this.attackTimer  = 0;
         this.waypoints    = []; // pre-computed path waypoints around the building
@@ -389,9 +390,13 @@ function setupConnection() {
             if (idx !== -1) {
                 zombies[idx].hp--;
                 if (zombies[idx].hp <= 0) {
+                    const zx = zombies[idx].x, zy = zombies[idx].y;
                     zombies.splice(idx, 1);
-                    // send kill reward back to the joiner who landed the killing blow
-                    if (conn && conn.open) conn.send({ type: 'killReward', amount: ZOMBIE_KILL_REWARD });
+                    spawnBloodSmear(zx, zy);
+                    if (conn && conn.open) {
+                        conn.send({ type: 'killReward', amount: ZOMBIE_KILL_REWARD });
+                        conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
+                    }
                 }
             }
         } else if (data.type === 'killReward') {
@@ -409,6 +414,9 @@ function setupConnection() {
             if (kills > 0 && conn && conn.open) {
                 conn.send({ type: 'killReward', amount: ZOMBIE_KILL_REWARD * kills });
             }
+        } else if (data.type === 'deathMark') {
+            if (data.markType === 'blood') spawnBloodSmear(data.x, data.y);
+            else if (data.markType === 'scorch') spawnScorchMark(data.x, data.y);
         }
     });
 
@@ -492,7 +500,7 @@ function updatePlayer(dt) {
     if (playerDead) {
         // still broadcast dead state so the other player and zombies know
         if (conn && conn.open) {
-            conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, dead: true });
+            conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, weaponId: inventory[currentWeapon], dead: true });
         }
         return;
     }
@@ -578,7 +586,7 @@ function updatePlayer(dt) {
 
     // send position + current weapon to the other player
     if (conn && conn.open) {
-        conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, dead: playerDead, name: localPlayerName });
+        conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, weaponId: inventory[currentWeapon], dead: playerDead, name: localPlayerName });
     }
 }
 
@@ -587,6 +595,11 @@ function updatePlayer(dt) {
 function spawnRaygunExplosion(x, y, rewardMoney = true) {
     spawnParticles(x, y, '#40ff60', 20);
     spawnParticles(x, y, '#a0ffb0', 10);
+    spawnScorchMark(x, y);
+    // tell joiner about the scorch — skip when handling joiner's AoE (they already have it)
+    if (shouldSimulateZombies() && rewardMoney && conn && conn.open) {
+        conn.send({ type: 'deathMark', markType: 'scorch', x, y });
+    }
 
     const radius = WEAPON_DEFS[2].aoeRadius;
     let kills = 0;
@@ -843,6 +856,29 @@ function spawnPlankDebris(win, outDir) {
     }
 }
 
+function spawnBloodSmear(x, y) {
+    const angle = Math.random() * Math.PI * 2;
+    const blobs = [];
+    const count = 4 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i++) {
+        blobs.push({
+            ox:  (Math.random() - 0.5) * 16,
+            oy:  (Math.random() - 0.5) * 8,
+            rx:  5 + Math.random() * 9,
+            ry:  3 + Math.random() * 4,
+            rot: (Math.random() - 0.5) * 1.5,
+        });
+    }
+    const life = 10 + Math.random() * 5;
+    groundMarks.push({ type: 'blood', x, y, life, maxLife: life, angle, blobs });
+}
+
+function spawnScorchMark(x, y) {
+    const r    = 22 + Math.random() * 16;
+    const life = 15 + Math.random() * 8;
+    groundMarks.push({ type: 'scorch', x, y, r, life, maxLife: life });
+}
+
 function updatePlankDebris(dt) {
     for (let i = plankDebris.length - 1; i >= 0; i--) {
         const d = plankDebris[i];
@@ -858,6 +894,47 @@ function updatePlankDebris(dt) {
             d.vy *= Math.pow(0.88, dt * 60);
             d.angleV *= Math.pow(0.88, dt * 60);
         }
+    }
+}
+
+function updateGroundMarks(dt) {
+    for (let i = groundMarks.length - 1; i >= 0; i--) {
+        groundMarks[i].life -= dt;
+        if (groundMarks[i].life <= 0) groundMarks.splice(i, 1);
+    }
+}
+
+function drawGroundMarks() {
+    for (const m of groundMarks) {
+        const t = m.life / m.maxLife;
+        const alpha = Math.min(1, t * 4) * t * 0.85; // fade in fast, fade out slowly
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        if (m.type === 'blood') {
+            ctx.translate(m.x, m.y);
+            ctx.rotate(m.angle);
+            for (const b of m.blobs) {
+                ctx.save();
+                ctx.translate(b.ox, b.oy);
+                ctx.rotate(b.rot);
+                ctx.fillStyle = '#6a0000';
+                ctx.beginPath();
+                ctx.ellipse(0, 0, b.rx, b.ry, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        } else {
+            // scorch — dark radial gradient
+            const grad = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
+            grad.addColorStop(0,   'rgba(8,5,2,0.95)');
+            grad.addColorStop(0.45, 'rgba(14,10,4,0.7)');
+            grad.addColorStop(1,   'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
     }
 }
 
@@ -926,7 +1003,13 @@ function updateBullets(dt) {
                         spawnRaygunExplosion(b.x, b.y);
                     } else {
                         z.hp--;
-                        if (z.hp <= 0) { zombies.splice(j, 1); money += ZOMBIE_KILL_REWARD; }
+                        if (z.hp <= 0) {
+                            const zx = z.x, zy = z.y;
+                            zombies.splice(j, 1);
+                            money += ZOMBIE_KILL_REWARD;
+                            spawnBloodSmear(zx, zy);
+                            if (conn && conn.open) conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
+                        }
                     }
                     zombieHit = true;
                     break;
@@ -1340,16 +1423,40 @@ function drawBuilding() {
     }
 }
 
-// draws a character — weapon param drives whether the gun is shown
-function drawCharacter(x, y, angle, bodyColor, weapon) {
+// draws a character — weaponId is the WEAPON_DEFS id (0=pistol, 1=shotgun, 2=raygun)
+function drawCharacter(x, y, angle, bodyColor, weaponId) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
 
-    // pistol — drawn first so it sits behind the body
-    if (weapon === 0) {
+    // weapon — drawn first so it sits behind the body
+    if (weaponId === 0) {
+        // pistol
         ctx.fillStyle = '#111';
-        ctx.fillRect(2, 7, 16, 5);   // barrel
+        ctx.fillRect(2, 7, 16, 5);
+    } else if (weaponId === 1) {
+        // shotgun — wooden stock, receiver, twin barrels
+        ctx.fillStyle = '#6b4a0f';
+        ctx.fillRect(-1, 7, 5, 7);    // stock
+        ctx.fillStyle = '#444';
+        ctx.fillRect(4, 6, 5, 9);     // receiver
+        ctx.fillStyle = '#555';
+        ctx.fillRect(9, 6, 13, 4);    // barrel 1
+        ctx.fillRect(9, 11, 13, 4);   // barrel 2
+    } else if (weaponId === 2) {
+        // ray gun — purple body, glowing green emitter
+        ctx.fillStyle = '#3a2060';
+        ctx.fillRect(0, 7, 8, 7);     // grip/body
+        ctx.fillStyle = '#7050cc';
+        ctx.fillRect(8, 8, 10, 6);    // barrel
+        ctx.save();
+        ctx.shadowColor = '#40ff60';
+        ctx.shadowBlur  = 8;
+        ctx.fillStyle   = '#60ffaa';
+        ctx.beginPath();
+        ctx.arc(19, 11, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
     }
 
     // body
@@ -1358,13 +1465,11 @@ function drawCharacter(x, y, angle, bodyColor, weapon) {
     ctx.ellipse(0, 0, 10, 14, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // arm — skin-tone ellipse bridging body to gun
-    if (weapon === 0) {
-        ctx.fillStyle = '#c8906a';
-        ctx.beginPath();
-        ctx.ellipse(7, 9, 4, 2.5, 0.3, 0, Math.PI * 2);
-        ctx.fill();
-    }
+    // arm — always shown
+    ctx.fillStyle = '#c8906a';
+    ctx.beginPath();
+    ctx.ellipse(7, 9, 4, 2.5, 0.3, 0, Math.PI * 2);
+    ctx.fill();
 
     // head
     ctx.fillStyle = '#c8906a';
@@ -1416,7 +1521,7 @@ function drawPlayer() {
         drawPlayerName(player.x, player.y, localPlayerName, '#cc2020');
         return;
     }
-    drawCharacter(player.x, player.y, player.angle, '#3a3a3a', currentWeapon);
+    drawCharacter(player.x, player.y, player.angle, '#3a3a3a', inventory[currentWeapon]);
     drawPlayerName(player.x, player.y, localPlayerName, '#ddd');
 }
 
@@ -1445,7 +1550,7 @@ function drawRemotePlayer() {
         drawPlayerName(remotePeer.x, remotePeer.y, remotePeer.name ?? 'Player', '#cc2020');
         return;
     }
-    drawCharacter(remotePeer.x, remotePeer.y, remotePeer.angle, '#8b2020', remotePeer.weapon ?? 0);
+    drawCharacter(remotePeer.x, remotePeer.y, remotePeer.angle, '#8b2020', remotePeer.weaponId ?? 0);
     drawPlayerName(remotePeer.x, remotePeer.y, remotePeer.name ?? 'Player', '#e07070');
 }
 
@@ -1854,6 +1959,7 @@ function gameLoop(timestamp) {
     updateBullets(dt);
     updateParticles(dt);
     updatePlankDebris(dt);
+    updateGroundMarks(dt);
     updateBarricadeRepair(dt);
     updateWeaponPickup(dt);
     updateMysteryBox(dt);
@@ -1870,6 +1976,7 @@ function gameLoop(timestamp) {
     drawFloor();
     drawWorldBorder();
     drawBuilding();
+    drawGroundMarks();
     drawMysteryBox();
     drawWeaponPickup();
     drawPlankDebris();
