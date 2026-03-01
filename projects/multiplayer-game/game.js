@@ -34,9 +34,10 @@ const player = {
 // 0 = slot 1, etc. — only slot 0 (pistol) is defined for now
 // ─── weapon definitions ───────────────────────────────────────────────────────
 const WEAPON_DEFS = [
-    { id: 0, name: 'pistol',  magSize: 8,  reloadTime: 1.5, cooldown: 0.25, pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 700, aoeRadius: 0  },
-    { id: 1, name: 'shotgun', magSize: 2,  reloadTime: 2.2, cooldown: 0.9,  pellets: 7, spread: 0.28, cost: 200, bulletSpeed: 700, aoeRadius: 0  },
-    { id: 2, name: 'raygun',  magSize: 12, reloadTime: 1.8, cooldown: 0.5,  pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 900, aoeRadius: 80 },
+    { id: 0, name: 'pistol',  magSize: 8,  reloadTime: 1.5, cooldown: 0.25, pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 700, aoeRadius: 0,  reserve: Infinity },
+    { id: 1, name: 'shotgun', magSize: 2,  reloadTime: 2.2, cooldown: 0.9,  pellets: 7, spread: 0.28, cost: 200, bulletSpeed: 700, aoeRadius: 0,  reserve: 16       },
+    { id: 2, name: 'raygun',     magSize: 12, reloadTime: 1.8, cooldown: 0.5,  pellets: 1, spread: 0,    cost: 0, bulletSpeed: 900, aoeRadius: 80, reserve: 36 },
+    { id: 3, name: 'machinegun', magSize: 30, reloadTime: 3.0, cooldown: 0.1,  pellets: 1, spread: 0.06, cost: 0, bulletSpeed: 680, aoeRadius: 0,  reserve: 90, autoFire: true },
 ];
 const RAYGUN_AOE_DAMAGE = 3; // enough to insta-kill (ZOMBIE_HP = 2)
 const MAG_SIZE    = WEAPON_DEFS[0].magSize;  // kept for backward compat
@@ -44,8 +45,10 @@ const RELOAD_TIME = WEAPON_DEFS[0].reloadTime;
 
 let currentWeapon  = 0;                      // active slot index
 let inventory      = [0, -1, -1];            // WEAPON_DEFS id per slot; -1 = empty
-let savedAmmo      = [MAG_SIZE, 0, 0];       // ammo saved per slot
+let savedAmmo      = [MAG_SIZE, 0, 0];       // mag ammo saved per slot
+let reserveAmmo    = [Infinity, 0, 0];       // reserve (spare) ammo per slot
 let weaponCooldown = 0;
+let mouseHeld      = false;
 
 let magAmmo      = MAG_SIZE;
 let reloading    = false;
@@ -68,6 +71,8 @@ const remoteBullets = []; // other player's bullets
 const particles     = []; // visual hit effects
 const plankDebris   = []; // broken barricade pieces
 const groundMarks   = []; // blood smears and scorch marks
+const ammoDrops     = []; // max ammo power-up drops
+let   nextDropId    = 0;
 
 // holds the last state received from the other player
 let remotePeer = null;
@@ -134,6 +139,35 @@ const BUILDING = {
     wallThickness: 24,
 };
 
+// ─── extra room (below the main building) ────────────────────────────────────
+const DOOR_GAP  = 70;   // width of the door opening in the bottom wall
+const DOOR_COST = 500;
+
+// Room positioned below the building, centred on the door opening
+const EXTRA_ROOM = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    const doorCX = b.x + b.w * 0.70; // door at 70% across the bottom wall
+    return {
+        x:      doorCX - 110,   // room is 220px wide, centred on door
+        y:      b.y + b.h,      // starts at the outer face of the bottom wall
+        w:      260,
+        h:      220,
+        wallThickness: t,
+        doorCX,
+    };
+})();
+
+// The barrier rect that physically seals the doorway when locked
+const DOOR_BARRIER = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    return {
+        x: EXTRA_ROOM.doorCX - DOOR_GAP / 2,
+        y: b.y + b.h - t,
+        w: DOOR_GAP,
+        h: t,
+    };
+})();
+
 // A window is a gap in one of the walls.
 // planks tracks how many boards cover it (ready for future destruction logic).
 class GameWindow {
@@ -196,6 +230,43 @@ function buildWalls() {
 }
 
 const walls = buildWalls();
+
+// Carve the door gap out of the main building's bottom wall.
+// buildWalls() created a segment to the right of the bottom window — split it.
+(() => {
+    const b  = BUILDING, t = b.wallThickness;
+    const dx  = DOOR_BARRIER.x;
+    const dx2 = DOOR_BARRIER.x + DOOR_BARRIER.w;
+    const idx = walls.findIndex(w =>
+        Math.abs(w.y - (b.y + b.h - t)) < 1 && // bottom wall
+        w.x > b.x + 100 &&                       // right of the bottom window
+        w.x + w.w >= b.x + b.w - 10             // extends to the right edge
+    );
+    if (idx !== -1) {
+        const s = walls[idx];
+        walls.splice(idx, 1,
+            { x: s.x,  y: s.y, w: dx - s.x,           h: t }, // left of door
+            { x: dx2,  y: s.y, w: (s.x + s.w) - dx2,  h: t }, // right of door
+        );
+    }
+})();
+
+// Add extra room perimeter walls (top boundary is the main building's bottom wall)
+const extraRoomWalls = (() => {
+    const r = EXTRA_ROOM, t = r.wallThickness;
+    return [
+        { x: r.x,           y: r.y,           w: t,   h: r.h }, // left
+        { x: r.x + r.w - t, y: r.y,           w: t,   h: r.h }, // right
+        { x: r.x,           y: r.y + r.h - t, w: r.w, h: t   }, // bottom
+    ];
+})();
+walls.push(...extraRoomWalls);
+
+// Door barrier seals the gap; removed from walls[] on unlock
+walls.push(DOOR_BARRIER);
+
+let extraRoomUnlocked = false;
+let doorProgress      = 0; // 0..1 buy-progress
 
 // ─── collision helpers ────────────────────────────────────────────────────────
 
@@ -393,6 +464,7 @@ function setupConnection() {
                     const zx = zombies[idx].x, zy = zombies[idx].y;
                     zombies.splice(idx, 1);
                     spawnBloodSmear(zx, zy);
+                    trySpawnAmmoDrop(zx, zy);
                     if (conn && conn.open) {
                         conn.send({ type: 'killReward', amount: ZOMBIE_KILL_REWARD });
                         conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
@@ -417,6 +489,18 @@ function setupConnection() {
         } else if (data.type === 'deathMark') {
             if (data.markType === 'blood') spawnBloodSmear(data.x, data.y);
             else if (data.markType === 'scorch') spawnScorchMark(data.x, data.y);
+        } else if (data.type === 'ammoDrop') {
+            ammoDrops.push({ id: data.id, x: data.x, y: data.y, life: 15, anim: 0 });
+        } else if (data.type === 'pickupAmmoDrop') {
+            const di = ammoDrops.findIndex(d => d.id === data.id);
+            if (di !== -1) ammoDrops.splice(di, 1);
+            applyMaxAmmo();
+        } else if (data.type === 'unlockRoom') {
+            if (!extraRoomUnlocked) {
+                extraRoomUnlocked = true;
+                const idx = walls.indexOf(DOOR_BARRIER);
+                if (idx !== -1) walls.splice(idx, 1);
+            }
         }
     });
 
@@ -448,7 +532,7 @@ document.addEventListener('keydown', e => {
     if (e.key === '3') switchWeapon(2);
 
     // reload
-    if ((e.key === 'r' || e.key === 'R') && !reloading && magAmmo < curWeaponDef().magSize) {
+    if ((e.key === 'r' || e.key === 'R') && !reloading && magAmmo < curWeaponDef().magSize && reserveAmmo[currentWeapon] > 0) {
         reloading   = true;
         reloadTimer = curWeaponDef().reloadTime;
     }
@@ -461,15 +545,16 @@ document.addEventListener('mousemove', e => {
     mouse.y = e.clientY - rect.top;
 });
 
-// fire on click
-canvas.addEventListener('click', () => {
-    if (weaponCooldown > 0 || reloading) return;
+function tryFire() {
+    if (weaponCooldown > 0 || reloading || playerDead) return;
     const wDef = curWeaponDef();
 
-    // auto-reload if empty
+    // auto-reload if empty (only if reserve available)
     if (magAmmo <= 0) {
-        reloading   = true;
-        reloadTimer = wDef.reloadTime;
+        if (reserveAmmo[currentWeapon] > 0) {
+            reloading   = true;
+            reloadTimer = wDef.reloadTime;
+        }
         return;
     }
 
@@ -488,11 +573,13 @@ canvas.addEventListener('click', () => {
     magAmmo--;
     weaponCooldown = wDef.cooldown;
 
-    // tell the other player about these bullets
     if (conn && conn.open) {
         conn.send({ type: 'shoot', bullets: newBullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, weaponId: b.weaponId })) });
     }
-});
+}
+
+canvas.addEventListener('mousedown', () => { mouseHeld = true;  tryFire(); });
+canvas.addEventListener('mouseup',   () => { mouseHeld = false; });
 
 // ─── update ───────────────────────────────────────────────────────────────────
 
@@ -535,7 +622,13 @@ function updatePlayer(dt) {
     if (reloading) {
         reloadTimer -= dt;
         if (reloadTimer <= 0) {
-            magAmmo   = curWeaponDef().magSize;
+            const wDef  = curWeaponDef();
+            const space = wDef.magSize - magAmmo;
+            const fill  = reserveAmmo[currentWeapon] === Infinity
+                ? space
+                : Math.min(space, reserveAmmo[currentWeapon]);
+            magAmmo += fill;
+            if (reserveAmmo[currentWeapon] !== Infinity) reserveAmmo[currentWeapon] -= fill;
             reloading = false;
         }
     }
@@ -584,6 +677,9 @@ function updatePlayer(dt) {
         playerHp = Math.min(PLAYER_MAX_HP, playerHp + HP_REGEN_RATE * dt);
     }
 
+    // auto-fire while mouse held (machine gun and any other autoFire weapons)
+    if (mouseHeld && curWeaponDef().autoFire) tryFire();
+
     // send position + current weapon to the other player
     if (conn && conn.open) {
         conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, weaponId: inventory[currentWeapon], dead: playerDead, name: localPlayerName });
@@ -609,9 +705,11 @@ function spawnRaygunExplosion(x, y, rewardMoney = true) {
             if (Math.hypot(zombies[i].x - x, zombies[i].y - y) < radius) {
                 zombies[i].hp -= RAYGUN_AOE_DAMAGE;
                 if (zombies[i].hp <= 0) {
+                    const zx = zombies[i].x, zy = zombies[i].y;
                     zombies.splice(i, 1);
                     if (rewardMoney) money += ZOMBIE_KILL_REWARD;
                     kills++;
+                    trySpawnAmmoDrop(zx, zy);
                 }
             }
         }
@@ -740,14 +838,27 @@ function updateMysteryBox(dt) {
             if (money < mb.cost) return;
             money -= mb.cost;
             mysteryBoxOpened = true;
-            if (Math.random() < 0.5) {
-                // ray gun — find first empty slot or replace current
+            const roll = Math.random();
+            if (roll < 0.4) {
+                // ray gun
                 let targetSlot = inventory.indexOf(-1);
                 if (targetSlot === -1) targetSlot = currentWeapon;
-                inventory[targetSlot]  = 2;
-                savedAmmo[targetSlot]  = WEAPON_DEFS[2].magSize;
+                inventory[targetSlot]   = 2;
+                savedAmmo[targetSlot]   = WEAPON_DEFS[2].magSize;
+                reserveAmmo[targetSlot] = WEAPON_DEFS[2].reserve;
+                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[2].magSize; reloading = false; reloadTimer = 0; }
                 switchWeapon(targetSlot);
                 mysteryBoxResult = { text: 'RAY GUN!', color: '#40ff60', timer: 2.5 };
+            } else if (roll < 0.8) {
+                // machine gun
+                let targetSlot = inventory.indexOf(-1);
+                if (targetSlot === -1) targetSlot = currentWeapon;
+                inventory[targetSlot]   = 3;
+                savedAmmo[targetSlot]   = WEAPON_DEFS[3].magSize;
+                reserveAmmo[targetSlot] = WEAPON_DEFS[3].reserve;
+                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[3].magSize; reloading = false; reloadTimer = 0; }
+                switchWeapon(targetSlot);
+                mysteryBoxResult = { text: 'MACHINE GUN!', color: '#e8c020', timer: 2.5 };
             } else {
                 // teddy bear — does nothing
                 mysteryBoxResult = { text: 'TEDDY BEAR!', color: '#c8843a', timer: 2.5 };
@@ -755,6 +866,87 @@ function updateMysteryBox(dt) {
         }
     } else {
         mysteryBoxProgress = Math.max(0, mysteryBoxProgress - dt * 3);
+    }
+}
+
+function updateExtraRoomDoor(dt) {
+    if (extraRoomUnlocked) return;
+    const db   = DOOR_BARRIER;
+    const cx   = db.x + db.w / 2;
+    const cy   = db.y + db.h / 2;
+    const dist = Math.hypot(player.x - cx, player.y - cy);
+    const holding = keys['f'] || keys['F'];
+
+    if (dist < BARRICADE_RANGE && holding) {
+        if (money >= DOOR_COST) {
+            doorProgress = Math.min(1, doorProgress + dt / 1.5);
+            if (doorProgress >= 1) {
+                doorProgress = 0;
+                money -= DOOR_COST;
+                unlockExtraRoom();
+            }
+        }
+    } else {
+        doorProgress = Math.max(0, doorProgress - dt * 3);
+    }
+}
+
+function unlockExtraRoom() {
+    extraRoomUnlocked = true;
+    const idx = walls.indexOf(DOOR_BARRIER);
+    if (idx !== -1) walls.splice(idx, 1);
+    if (conn && conn.open) conn.send({ type: 'unlockRoom' });
+}
+
+function drawExtraRoom() {
+    const r = EXTRA_ROOM, t = r.wallThickness;
+
+    // interior floor (slightly different shade to distinguish from main building)
+    ctx.fillStyle = '#202020';
+    ctx.fillRect(r.x + t, r.y, r.w - t * 2, r.h - t);
+
+    // perimeter walls
+    ctx.fillStyle = '#2a2a2a';
+    for (const w of extraRoomWalls) ctx.fillRect(w.x, w.y, w.w, w.h);
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 2;
+    for (const w of extraRoomWalls) ctx.strokeRect(w.x, w.y, w.w, w.h);
+
+    // door — wooden panels when locked, open gap when unlocked
+    const db = DOOR_BARRIER;
+    if (!extraRoomUnlocked) {
+        // wooden door fill
+        ctx.fillStyle = '#5a3e14';
+        ctx.fillRect(db.x, db.y, db.w, db.h);
+        ctx.strokeStyle = '#8B6020';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(db.x, db.y, db.w, db.h);
+
+        // decorative panel lines
+        ctx.strokeStyle = '#4a3010';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const mid = db.x + db.w / 2;
+        ctx.moveTo(mid, db.y + 3);
+        ctx.lineTo(mid, db.y + db.h - 3);
+        ctx.stroke();
+
+        // price label (inside building, above the door)
+        ctx.save();
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#e8c060';
+        ctx.fillText(`[F] £${DOOR_COST}`, db.x + db.w / 2, db.y - 3);
+        ctx.restore();
+
+        // progress bar
+        if (doorProgress > 0) {
+            ctx.fillStyle = '#222';
+            ctx.fillRect(db.x, db.y - 9, db.w, 4);
+            ctx.fillStyle = '#e8c060';
+            ctx.fillRect(db.x, db.y - 9, db.w * doorProgress, 4);
+        }
     }
 }
 
@@ -821,8 +1013,10 @@ function updateWeaponPickup(dt) {
             // find first empty slot; if none, replace current slot
             let targetSlot = inventory.indexOf(-1);
             if (targetSlot === -1) targetSlot = currentWeapon;
-            inventory[targetSlot]  = 1;
-            savedAmmo[targetSlot]  = WEAPON_DEFS[1].magSize;
+            inventory[targetSlot]   = 1;
+            savedAmmo[targetSlot]   = WEAPON_DEFS[1].magSize;
+            reserveAmmo[targetSlot] = WEAPON_DEFS[1].reserve;
+            if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[1].magSize; reloading = false; reloadTimer = 0; }
             switchWeapon(targetSlot);
         }
     } else {
@@ -938,6 +1132,71 @@ function drawGroundMarks() {
     }
 }
 
+function applyMaxAmmo() {
+    for (let i = 0; i < 3; i++) {
+        if (inventory[i] === -1) continue;
+        const wDef = WEAPON_DEFS[inventory[i]];
+        savedAmmo[i] = wDef.magSize;
+        if (reserveAmmo[i] !== Infinity) reserveAmmo[i] = wDef.reserve;
+    }
+    magAmmo   = curWeaponDef().magSize;
+    reloading = false;
+    reloadTimer = 0;
+}
+
+function trySpawnAmmoDrop(x, y) {
+    if (Math.random() >= 0.05) return; // 5% chance per kill
+    const id = nextDropId++;
+    ammoDrops.push({ id, x, y, life: 15, anim: 0 });
+    if (conn && conn.open) conn.send({ type: 'ammoDrop', id, x, y });
+}
+
+function updateAmmoDrops(dt) {
+    for (let i = ammoDrops.length - 1; i >= 0; i--) {
+        const d = ammoDrops[i];
+        d.anim = (d.anim + dt * 3) % (Math.PI * 2);
+        d.life -= dt;
+        if (d.life <= 0) { ammoDrops.splice(i, 1); continue; }
+        if (!playerDead && Math.hypot(player.x - d.x, player.y - d.y) < 20) {
+            applyMaxAmmo();
+            if (conn && conn.open) conn.send({ type: 'pickupAmmoDrop', id: d.id });
+            ammoDrops.splice(i, 1);
+        }
+    }
+}
+
+function drawAmmoDrops() {
+    for (const d of ammoDrops) {
+        const glow = 0.5 + 0.5 * Math.sin(d.anim);
+        const bob  = Math.sin(d.anim * 0.7) * 3;
+        const cx = d.x, cy = d.y + bob;
+        const w = 28, h = 18;
+        ctx.save();
+        // pulsing glow
+        const glowR = 20 + glow * 8;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+        grad.addColorStop(0, `rgba(255,200,0,${0.3 * glow})`);
+        grad.addColorStop(1, 'rgba(255,200,0,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+        // box
+        ctx.fillStyle = '#1a1200';
+        ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+        ctx.strokeStyle = `rgba(255,190,0,${0.6 + 0.4 * glow})`;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+        // label
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = `rgba(255,210,0,${0.85 + 0.15 * glow})`;
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText('MAX', cx, cy - 3);
+        ctx.font = '6px monospace';
+        ctx.fillText('AMMO', cx, cy + 5);
+        ctx.restore();
+    }
+}
+
 function drawPlankDebris() {
     for (const d of plankDebris) {
         // fade only in the last 0.6s
@@ -1008,6 +1267,7 @@ function updateBullets(dt) {
                             zombies.splice(j, 1);
                             money += ZOMBIE_KILL_REWARD;
                             spawnBloodSmear(zx, zy);
+                            trySpawnAmmoDrop(zx, zy);
                             if (conn && conn.open) conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
                         }
                     }
@@ -1423,7 +1683,7 @@ function drawBuilding() {
     }
 }
 
-// draws a character — weaponId is the WEAPON_DEFS id (0=pistol, 1=shotgun, 2=raygun)
+// draws a character — weaponId is the WEAPON_DEFS id (0=pistol, 1=shotgun, 2=raygun, 3=machinegun)
 function drawCharacter(x, y, angle, bodyColor, weaponId) {
     ctx.save();
     ctx.translate(x, y);
@@ -1457,6 +1717,37 @@ function drawCharacter(x, y, angle, bodyColor, weaponId) {
         ctx.arc(19, 11, 2.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+    } else if (weaponId === 3) {
+        // AK-47
+        // wooden stock
+        ctx.fillStyle = '#8B5E1A';
+        ctx.fillRect(-7, 7, 7, 6);
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(-7, 7, 1.5, 6);  // butt plate
+        // receiver (dark metal)
+        ctx.fillStyle = '#252525';
+        ctx.fillRect(0, 6, 11, 8);
+        // banana magazine — trapezoid shape curves slightly forward
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath();
+        ctx.moveTo(1.5, 14);
+        ctx.lineTo(8,   14);
+        ctx.lineTo(9.5, 21);
+        ctx.lineTo(3,   21);
+        ctx.closePath();
+        ctx.fill();
+        // wooden handguard around barrel
+        ctx.fillStyle = '#8B5E1A';
+        ctx.fillRect(11, 8, 9, 5);
+        // gas tube above barrel
+        ctx.fillStyle = '#383838';
+        ctx.fillRect(11, 6, 17, 2);
+        // barrel
+        ctx.fillStyle = '#3a3a3a';
+        ctx.fillRect(20, 8.5, 10, 3);
+        // muzzle / flash hider
+        ctx.fillStyle = '#555';
+        ctx.fillRect(29, 7.5, 3, 5);
     }
 
     // body
@@ -1692,6 +1983,41 @@ function drawRaygunIcon(cx, cy) {
     ctx.restore();
 }
 
+function drawMachinegunIcon(cx, cy) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    // wooden stock
+    ctx.fillStyle = '#8B5E1A';
+    ctx.fillRect(-20, 0, 8, 4);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(-20, 0, 1.5, 4);  // butt plate
+    // receiver
+    ctx.fillStyle = '#252525';
+    ctx.fillRect(-12, -3, 12, 8);
+    // banana magazine (trapezoid)
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.moveTo(-11, 5);
+    ctx.lineTo(-4,  5);
+    ctx.lineTo(-2.5, 13);
+    ctx.lineTo(-9,  13);
+    ctx.closePath();
+    ctx.fill();
+    // wooden handguard
+    ctx.fillStyle = '#8B5E1A';
+    ctx.fillRect(0, -2, 10, 6);
+    // gas tube
+    ctx.fillStyle = '#444';
+    ctx.fillRect(0, -5, 22, 2);
+    // barrel
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(10, -1, 12, 3);
+    // muzzle
+    ctx.fillStyle = '#555';
+    ctx.fillRect(22, -2, 3, 5);
+    ctx.restore();
+}
+
 function drawHudPrompt(text) {
     const sx = canvas.width / 2;
     const sy = canvas.height / 2 - 60;
@@ -1707,6 +2033,20 @@ function drawHudPrompt(text) {
 }
 
 function drawBarricadePrompt() {
+    // extra room door prompt
+    if (!extraRoomUnlocked) {
+        const db  = DOOR_BARRIER;
+        const dcx = db.x + db.w / 2, dcy = db.y + db.h / 2;
+        if (Math.hypot(player.x - dcx, player.y - dcy) < BARRICADE_RANGE) {
+            const canAfford = money >= DOOR_COST;
+            const label = canAfford
+                ? `[F] Unlock Room  £${DOOR_COST}`
+                : `Unlock Room  £${DOOR_COST}  (need £${DOOR_COST - money} more)`;
+            drawHudPrompt(label);
+            return;
+        }
+    }
+
     // mystery box prompt
     if (!mysteryBoxOpened) {
         const mb  = MYSTERY_BOX;
@@ -1774,9 +2114,10 @@ function drawHotbar() {
 
         // weapon icon based on inventory slot
         const wid = inventory[i];
-        if (wid === 0) drawPistolIcon( x + slotSize / 2, y + slotSize / 2 + 2);
-        if (wid === 1) drawShotgunIcon(x + slotSize / 2, y + slotSize / 2 + 2);
-        if (wid === 2) drawRaygunIcon( x + slotSize / 2, y + slotSize / 2 + 2);
+        if (wid === 0) drawPistolIcon(     x + slotSize / 2, y + slotSize / 2 + 2);
+        if (wid === 1) drawShotgunIcon(    x + slotSize / 2, y + slotSize / 2 + 2);
+        if (wid === 2) drawRaygunIcon(     x + slotSize / 2, y + slotSize / 2 + 2);
+        if (wid === 3) drawMachinegunIcon( x + slotSize / 2, y + slotSize / 2 + 2);
     }
 }
 
@@ -1805,12 +2146,16 @@ function drawAmmo() {
         ctx.fillStyle = '#cc2020';
         ctx.fillRect(ax, ay + 2, 80 * progress, 6);
     } else {
-        const lowAmmo = magAmmo <= Math.ceil(wDef.magSize / 4);
-        const color = magAmmo === 0 ? '#cc2020' : lowAmmo ? '#e08020' : '#ccc';
+        const reserve  = reserveAmmo[currentWeapon];
+        const lowAmmo  = magAmmo <= Math.ceil(wDef.magSize / 4);
+        const noReserve = reserve === 0 && magAmmo === 0;
+        const color = noReserve ? '#cc2020' : lowAmmo ? '#e08020' : '#ccc';
+        const reserveStr = reserve === Infinity ? '∞' : `${reserve}`;
         ctx.fillStyle = color;
         ctx.fillText(`${magAmmo}`, ax, ay + 6);
         ctx.font = '17px monospace';
-        ctx.fillText(` / ${wDef.magSize}`, ax + ctx.measureText(`${magAmmo}`).width + 2, ay + 6);
+        ctx.fillStyle = '#666';
+        ctx.fillText(` / ${reserveStr}`, ax + ctx.measureText(`${magAmmo}`).width + 2, ay + 6);
     }
 
     ctx.textAlign = 'left'; // reset
@@ -1960,9 +2305,11 @@ function gameLoop(timestamp) {
     updateParticles(dt);
     updatePlankDebris(dt);
     updateGroundMarks(dt);
+    updateAmmoDrops(dt);
     updateBarricadeRepair(dt);
     updateWeaponPickup(dt);
     updateMysteryBox(dt);
+    updateExtraRoomDoor(dt);
     updateZombies(dt);
     updateJoinerZombieDamage(dt);
     updateCamera();
@@ -1975,10 +2322,12 @@ function gameLoop(timestamp) {
 
     drawFloor();
     drawWorldBorder();
+    drawExtraRoom();
     drawBuilding();
     drawGroundMarks();
     drawMysteryBox();
     drawWeaponPickup();
+    drawAmmoDrops();
     drawPlankDebris();
     drawZombies();
     drawBullets();
