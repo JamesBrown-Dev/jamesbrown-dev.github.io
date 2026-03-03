@@ -22,8 +22,9 @@ const camera = { x: 0, y: 0 };
 
 const PLAYER_SPEED  = 200;
 const PLAYER_RADIUS = 14;
-const BULLET_SPEED  = 700;
 const BULLET_LIFE   = 1.2; // seconds before expiring
+const GUN_TIP_X     = 18;  // barrel tip offset in player-local space
+const GUN_TIP_Y     = 9.5;
 
 const player = {
     x: WORLD_W / 2,
@@ -31,30 +32,266 @@ const player = {
     angle: 0,
 };
 
-// 0 = slot 1, etc. — only slot 0 (pistol) is defined for now
 // ─── weapon definitions ───────────────────────────────────────────────────────
+
+class WeaponDef {
+    constructor(opts) {
+        this.id           = opts.id;
+        this.name         = opts.name;
+        this.magSize      = opts.magSize;
+        this.reloadTime   = opts.reloadTime;
+        this.cooldown     = opts.cooldown;
+        this.pellets      = opts.pellets      ?? 1;
+        this.spread       = opts.spread       ?? 0;
+        this.cost         = opts.cost         ?? 0;
+        this.bulletSpeed  = opts.bulletSpeed;
+        this.aoeRadius    = opts.aoeRadius    ?? 0;
+        this.reserve      = opts.reserve;
+        this.autoFire     = opts.autoFire     ?? false;
+        // accuracy bloom — spread increases the longer the trigger is held
+        this.bloomPerShot      = opts.bloomPerShot      ?? 0;   // extra spread added per shot
+        this.maxBloom          = opts.maxBloom          ?? 0;   // cap on accumulated bloom
+        this.bloomDecay        = opts.bloomDecay        ?? 0;   // spread lost per second on release
+        this.firstShotCooldown = opts.firstShotCooldown ?? 0;   // seconds before bloom can reset again
+        // bullet visuals — read by Bullet constructor
+        this.bulletRadius    = opts.bulletRadius    ?? 2;
+        this.bulletColor     = opts.bulletColor     ?? '#f5e642';
+        this.bulletGlowing   = opts.bulletGlowing   ?? false;
+        this.bulletGlowColor = opts.bulletGlowColor ?? null;
+        // drawing — stored as functions so they run in whatever transform is active
+        this._drawModel = opts.drawModel ?? null;
+        this._drawIcon  = opts.drawIcon  ?? null;
+    }
+    // Call after ctx.translate(playerX, playerY) + ctx.rotate(angle)
+    drawModel() { if (this._drawModel) this._drawModel(); }
+    // Draws the hotbar icon centred on (cx, cy); handles its own save/restore
+    drawIcon(cx, cy) { if (this._drawIcon) this._drawIcon(cx, cy); }
+}
+
 const WEAPON_DEFS = [
-    { id: 0, name: 'pistol',  magSize: 8,  reloadTime: 1.5, cooldown: 0.25, pellets: 1, spread: 0,    cost: 0,   bulletSpeed: 700, aoeRadius: 0,  reserve: Infinity },
-    { id: 1, name: 'shotgun', magSize: 2,  reloadTime: 2.2, cooldown: 0.9,  pellets: 7, spread: 0.28, cost: 200, bulletSpeed: 700, aoeRadius: 0,  reserve: 16       },
-    { id: 2, name: 'raygun',     magSize: 12, reloadTime: 1.8, cooldown: 0.5,  pellets: 1, spread: 0,    cost: 0, bulletSpeed: 900, aoeRadius: 80, reserve: 36 },
-    { id: 3, name: 'machinegun', magSize: 30, reloadTime: 3.0, cooldown: 0.1,  pellets: 1, spread: 0.06, cost: 0, bulletSpeed: 680, aoeRadius: 0,  reserve: 90, autoFire: true },
+    new WeaponDef({
+        id: 0, name: 'pistol', magSize: 8, reloadTime: 1.5, cooldown: 0.25,
+        pellets: 1, spread: 0, cost: 0, bulletSpeed: 700, aoeRadius: 0, reserve: Infinity,
+        bulletRadius: 2, bulletColor: '#f5e642',
+        drawModel() {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(2, 7, 16, 5);
+        },
+        drawIcon(cx, cy) {
+            ctx.save(); ctx.translate(cx, cy);
+            ctx.fillStyle = '#111';    ctx.fillRect(-2, -3, 14, 4);   // barrel
+            ctx.fillStyle = '#0a0a0a'; ctx.fillRect(-7, -2, 7, 9);    // handle
+            ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(-2, 5, 3.5, 0, Math.PI); ctx.stroke(); // trigger guard
+            ctx.restore();
+        },
+    }),
+    new WeaponDef({
+        id: 1, name: 'shotgun', magSize: 2, reloadTime: 2.2, cooldown: 0.9,
+        pellets: 12, spread: 0.28, cost: 200, bulletSpeed: 700, aoeRadius: 0, reserve: 16,
+        bulletRadius: 2, bulletColor: '#f5e642',
+        drawModel() {
+            ctx.fillStyle = '#6b4a0f'; ctx.fillRect(-1, 7, 5, 7);    // stock
+            ctx.fillStyle = '#444';    ctx.fillRect(4, 6, 5, 9);     // receiver
+            ctx.fillStyle = '#555';
+            ctx.fillRect(9, 6, 13, 4);   // barrel 1
+            ctx.fillRect(9, 11, 13, 4);  // barrel 2
+        },
+        drawIcon(cx, cy) {
+            ctx.save(); ctx.translate(cx, cy);
+            ctx.fillStyle = '#8b6914'; ctx.fillRect(-16, -1, 9, 6);  // stock
+            ctx.fillStyle = '#888';    ctx.fillRect(-7, -3, 8, 8);   // receiver
+            ctx.fillStyle = '#aaa';
+            ctx.fillRect(1, -4, 16, 3);  // barrel 1
+            ctx.fillRect(1,  1, 16, 3);  // barrel 2
+            ctx.restore();
+        },
+    }),
+    new WeaponDef({
+        id: 2, name: 'raygun', magSize: 12, reloadTime: 1.8, cooldown: 0.5,
+        pellets: 1, spread: 0, cost: 0, bulletSpeed: 900, aoeRadius: 80, reserve: 36,
+        bulletRadius: 4, bulletColor: '#80ffaa', bulletGlowing: true, bulletGlowColor: '#40ff60',
+        drawModel() {
+            ctx.fillStyle = '#3a2060'; ctx.fillRect(0, 7, 8, 7);   // grip
+            ctx.fillStyle = '#7050cc'; ctx.fillRect(8, 8, 10, 6);  // barrel
+            ctx.save();
+            ctx.shadowColor = '#40ff60'; ctx.shadowBlur = 8;
+            ctx.fillStyle = '#60ffaa';
+            ctx.beginPath(); ctx.arc(19, 11, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        },
+        drawIcon(cx, cy) {
+            ctx.save(); ctx.translate(cx, cy);
+            ctx.fillStyle = '#3a2a6a'; ctx.fillRect(-12, -1, 7, 7);   // handle
+            ctx.fillStyle = '#5a3aaa'; ctx.fillRect(-5, -4, 10, 9);   // body
+            ctx.fillStyle = '#8860dd'; ctx.fillRect(5, -2, 12, 5);    // barrel
+            ctx.shadowColor = '#40ff60'; ctx.shadowBlur = 6;
+            ctx.fillStyle = '#80ffaa';
+            ctx.beginPath(); ctx.arc(18, 0, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        },
+    }),
+    new WeaponDef({
+        id: 3, name: 'machinegun', magSize: 30, reloadTime: 3.0, cooldown: 0.1,
+        pellets: 1, spread: 0.06, cost: 0, bulletSpeed: 680, aoeRadius: 0, reserve: 90,
+        autoFire: true, bulletRadius: 2, bulletColor: '#f5e642',
+        bloomPerShot: 0.015, maxBloom: 0.18, bloomDecay: 1.5, firstShotCooldown: 0.3,
+        drawModel() {
+            ctx.fillStyle = '#8B5E1A'; ctx.fillRect(-7, 7, 7, 6);      // stock
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-7, 7, 1.5, 6);    // butt plate
+            ctx.fillStyle = '#252525'; ctx.fillRect(0, 6, 11, 8);      // receiver
+            ctx.fillStyle = '#1a1a1a';                                   // banana mag
+            ctx.beginPath();
+            ctx.moveTo(1.5, 14); ctx.lineTo(8, 14); ctx.lineTo(9.5, 21); ctx.lineTo(3, 21);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#8B5E1A'; ctx.fillRect(11, 8, 9, 5);     // handguard
+            ctx.fillStyle = '#383838'; ctx.fillRect(11, 6, 17, 2);    // gas tube
+            ctx.fillStyle = '#3a3a3a'; ctx.fillRect(20, 8.5, 10, 3);  // barrel
+            ctx.fillStyle = '#555';    ctx.fillRect(29, 7.5, 3, 5);   // muzzle
+        },
+        drawIcon(cx, cy) {
+            ctx.save(); ctx.translate(cx, cy);
+            ctx.fillStyle = '#8B5E1A'; ctx.fillRect(-20, 0, 8, 4);    // stock
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-20, 0, 1.5, 4);  // butt plate
+            ctx.fillStyle = '#252525'; ctx.fillRect(-12, -3, 12, 8);  // receiver
+            ctx.fillStyle = '#1a1a1a';                                  // banana mag
+            ctx.beginPath();
+            ctx.moveTo(-11, 5); ctx.lineTo(-4, 5); ctx.lineTo(-2.5, 13); ctx.lineTo(-9, 13);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#8B5E1A'; ctx.fillRect(0, -2, 10, 6);   // handguard
+            ctx.fillStyle = '#444';    ctx.fillRect(0, -5, 22, 2);   // gas tube
+            ctx.fillStyle = '#3a3a3a'; ctx.fillRect(10, -1, 12, 3);  // barrel
+            ctx.fillStyle = '#555';    ctx.fillRect(22, -2, 3, 5);   // muzzle
+            ctx.restore();
+        },
+    }),
+    new WeaponDef({
+        id: 4, name: 'uzi', magSize: 20, reloadTime: 1.4, cooldown: 0.07,
+        pellets: 1, spread: 0.04, cost: 150, bulletSpeed: 750, aoeRadius: 0, reserve: 60,
+        autoFire: true, bulletRadius: 2, bulletColor: '#f5e642',
+        bloomPerShot: 0.04, maxBloom: 0.38, bloomDecay: 2.5, firstShotCooldown: 0.4,
+        drawModel() {
+            ctx.fillStyle = '#252525'; ctx.fillRect(0, 7, 11, 7);    // receiver
+            ctx.fillStyle = '#3a3a3a'; ctx.fillRect(11, 8, 7, 5);    // short barrel
+            ctx.fillStyle = '#444';    ctx.fillRect(0, 6, 18, 2);    // top rail
+            ctx.fillStyle = '#111';    ctx.fillRect(3, 14, 5, 5);    // grip
+            ctx.fillStyle = '#2a2a2a'; ctx.fillRect(4, 12, 4, 4);    // box mag
+        },
+        drawIcon(cx, cy) {
+            ctx.save(); ctx.translate(cx, cy);
+            ctx.fillStyle = '#252525'; ctx.fillRect(-13, -3, 13, 7); // receiver
+            ctx.fillStyle = '#3a3a3a'; ctx.fillRect(0, -2, 7, 5);   // short barrel
+            ctx.fillStyle = '#444';    ctx.fillRect(-13, -5, 20, 2); // top rail
+            ctx.fillStyle = '#111';    ctx.fillRect(-9, 4, 5, 7);   // grip
+            ctx.fillStyle = '#2a2a2a'; ctx.fillRect(-8, 3, 4, 5);   // box mag
+            ctx.restore();
+        },
+    }),
 ];
-const RAYGUN_AOE_DAMAGE = 3; // enough to insta-kill (ZOMBIE_HP = 2)
-const MAG_SIZE    = WEAPON_DEFS[0].magSize;  // kept for backward compat
-const RELOAD_TIME = WEAPON_DEFS[0].reloadTime;
+const RAYGUN_AOE_DAMAGE = 4;
 
-let currentWeapon  = 0;                      // active slot index
-let inventory      = [0, -1, -1];            // WEAPON_DEFS id per slot; -1 = empty
-let savedAmmo      = [MAG_SIZE, 0, 0];       // mag ammo saved per slot
-let reserveAmmo    = [Infinity, 0, 0];       // reserve (spare) ammo per slot
-let weaponCooldown = 0;
-let mouseHeld      = false;
+// ─── bullet ───────────────────────────────────────────────────────────────────
 
-let magAmmo      = MAG_SIZE;
+class Bullet {
+    constructor(x, y, vx, vy, weaponId) {
+        const wDef      = WEAPON_DEFS[weaponId] || WEAPON_DEFS[0];
+        this.x          = x;
+        this.y          = y;
+        this.vx         = vx;
+        this.vy         = vy;
+        this.life       = BULLET_LIFE;
+        this.weaponId   = weaponId;
+        this.radius     = wDef.bulletRadius;
+        this.color      = wDef.bulletColor;
+        this.glowing    = wDef.bulletGlowing;
+        this.glowColor  = wDef.bulletGlowColor;
+    }
+
+    update(dt) {
+        this.x    += this.vx * dt;
+        this.y    += this.vy * dt;
+        this.life -= dt;
+    }
+
+    get alive() {
+        return this.life > 0 &&
+               this.x >= 0 && this.x <= WORLD_W &&
+               this.y >= 0 && this.y <= WORLD_H;
+    }
+
+    draw() {
+        if (this.glowing) {
+            ctx.save();
+            ctx.shadowColor = this.glowColor;
+            ctx.shadowBlur  = 8;
+            ctx.fillStyle   = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        } else {
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
+// ─── particle ─────────────────────────────────────────────────────────────────
+
+class Particle {
+    constructor(x, y, color, dirAngle) {
+        const a = dirAngle !== undefined
+            ? dirAngle + (Math.random() - 0.5) * Math.PI * 0.6
+            : Math.random() * Math.PI * 2;
+        const speed  = 150 + Math.random() * 250;
+        this.x       = x;
+        this.y       = y;
+        this.vx      = Math.cos(a) * speed;
+        this.vy      = Math.sin(a) * speed;
+        this.life    = 0.12 + Math.random() * 0.12;
+        this.maxLife = 0.24; // fixed reference so alpha starts < 1 for shorter-lived sparks
+        this.color   = color;
+    }
+
+    update(dt) {
+        this.x    += this.vx * dt;
+        this.y    += this.vy * dt;
+        this.vx   *= 0.82;
+        this.vy   *= 0.82;
+        this.life -= dt;
+    }
+
+    get alive() { return this.life > 0; }
+
+    draw() {
+        ctx.save();
+        ctx.globalAlpha = this.life / this.maxLife;
+        ctx.fillStyle   = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+let currentWeapon  = 0;                                    // active slot index
+let inventory      = [0, -1, -1];                         // WEAPON_DEFS id per slot; -1 = empty
+let savedAmmo      = [WEAPON_DEFS[0].magSize, 0, 0];      // mag ammo saved per slot
+let reserveAmmo    = [Infinity, 0, 0];                    // reserve (spare) ammo per slot
+let weaponCooldown     = 0;
+let mouseHeld          = false;
+let fireBloom          = 0;   // accumulated extra spread while holding trigger
+let firstShotCooldown  = 0;   // while > 0, mousedown will not reset bloom
+let moveSyncTimer   = 0;
+
+let magAmmo      = WEAPON_DEFS[0].magSize;
 let reloading    = false;
 let reloadTimer  = 0;
 
 function curWeaponDef() { return WEAPON_DEFS[inventory[currentWeapon]] || WEAPON_DEFS[0]; }
+function isHoldingF()   { return !!(keys['f'] || keys['F']); }
 
 function switchWeapon(slot) {
     if (slot === currentWeapon) return;
@@ -62,6 +299,7 @@ function switchWeapon(slot) {
     savedAmmo[currentWeapon] = magAmmo;
     reloading   = false;
     reloadTimer = 0;
+    fireBloom   = 0;
     currentWeapon = slot;
     magAmmo = savedAmmo[slot];
 }
@@ -87,7 +325,7 @@ const PLAYER_MAX_HP = 100;
 let playerHp        = PLAYER_MAX_HP;
 let playerDead      = false;
 let timeSinceDamage = 0; // seconds since last hit — regen starts after a delay
-const ZOMBIE_DPS    = 60;  // damage per second while in contact
+const ZOMBIE_DPS    = 120;  // damage per second while in contact
 const HP_REGEN_RATE = 4;   // hp per second regenerated when not taking damage
 const ZOMBIE_RADIUS = 12;
 
@@ -119,13 +357,15 @@ class Zombie {
         this.x            = x;
         this.y            = y;
         this.targetWindow = targetWindow;
-        this.state        = 'toWindow'; // 'toWindow' | 'attacking' | 'hunting'
+        this.state        = 'toWindow'; // 'toWindow' | 'attacking' | 'entering' | 'hunting'
         this.hp           = ZOMBIE_HP + Math.floor(wave / 5); // +1 HP every 5 waves
         this.speed        = ZOMBIE_WAVE_SPEED(wave);
         this.attackTimer  = 0;
-        this.waypoints    = []; // pre-computed path waypoints around the building
+        this.waypoints    = []; // pre-computed path waypoints (approach + optional corners)
+        this.huntTimer    = 0;  // countdown to next hunt-path refresh
+        this.huntWaypoints = []; // routing waypoints while hunting
         this.id           = nextZombieId++;
-        this.angle        = 0; // facing direction in radians
+        this.angle        = 0;
     }
 }
 
@@ -141,19 +381,24 @@ const BUILDING = {
 
 // ─── extra room (below the main building) ────────────────────────────────────
 const DOOR_GAP  = 70;   // width of the door opening in the bottom wall
-const DOOR_COST = 500;
+const DOOR_COST = 250;
 
-// Room positioned below the building, centred on the door opening
+// Corridor + end room positioned below the building
 const EXTRA_ROOM = (() => {
     const b = BUILDING, t = b.wallThickness;
-    const doorCX = b.x + b.w * 0.70; // door at 70% across the bottom wall
+    const doorCX          = b.x + b.w * 0.70; // door at 70% across the bottom wall
+    const buildingBottomY = b.y + b.h;         // outer face of building's bottom wall
+    const CORRIDOR_H      = 200;               // inner height of narrow corridor
+    const END_ROOM_W      = 400;               // outer width of end room (including walls)
+    const END_ROOM_H      = 280;               // inner height of end room
+    const endRoomL        = doorCX - END_ROOM_W / 2;
+    const endRoomR        = doorCX + END_ROOM_W / 2;
+    const endRoomTopY     = buildingBottomY + CORRIDOR_H;
     return {
-        x:      doorCX - 110,   // room is 220px wide, centred on door
-        y:      b.y + b.h,      // starts at the outer face of the bottom wall
-        w:      260,
-        h:      220,
+        doorCX, buildingBottomY,
+        CORRIDOR_H, END_ROOM_W, END_ROOM_H,
+        endRoomL, endRoomR, endRoomTopY,
         wallThickness: t,
-        doorCX,
     };
 })();
 
@@ -180,6 +425,14 @@ class GameWindow {
         this.planks = 3;
         this.buildProgress = 0; // 0..1 while player holds F
         this.buildAnim     = 1; // scale of newest plank (animates 0→1 on add)
+        // pre-computed plank geometry (constant for the window's dimensions)
+        const diagLen  = Math.hypot(w, h) + 4;
+        const crossLen = Math.max(w, h) + 4;
+        this.plankDefs = [
+            { angle: Math.atan2(h, w),  len: diagLen },
+            { angle: Math.atan2(-h, w), len: diagLen },
+            { angle: w >= h ? 0 : Math.PI / 2, len: crossLen },
+        ];
     }
 }
 
@@ -251,19 +504,88 @@ const walls = buildWalls();
     }
 })();
 
-// Add extra room perimeter walls (top boundary is the main building's bottom wall)
+// Windows carved into the end room walls (one per side: left, right, bottom)
+const extraRoomWindows = (() => {
+    const r = EXTRA_ROOM, t = r.wallThickness;
+    const { endRoomL, endRoomR, endRoomTopY, END_ROOM_H } = r;
+    const midY = endRoomTopY + (END_ROOM_H + t) / 2 - WINDOW_GAP / 2;
+    const midX = (endRoomL + endRoomR) / 2;
+    return [
+        new GameWindow(endRoomL,               midY,                         t,          WINDOW_GAP, 'left'),
+        new GameWindow(endRoomR - t,            midY,                         t,          WINDOW_GAP, 'right'),
+        new GameWindow(midX - WINDOW_GAP / 2,  endRoomTopY + END_ROOM_H,     WINDOW_GAP, t,          'bottom'),
+    ];
+})();
+
+// Corridor + end room walls (end room side walls carved around windows)
 const extraRoomWalls = (() => {
     const r = EXTRA_ROOM, t = r.wallThickness;
+    const { doorCX, buildingBottomY, CORRIDOR_H, END_ROOM_H, endRoomL, endRoomR, endRoomTopY } = r;
+    const cL = doorCX - DOOR_GAP / 2;
+    const cR = doorCX + DOOR_GAP / 2;
+    const [winL, winR, winB] = extraRoomWindows;
     return [
-        { x: r.x,           y: r.y,           w: t,   h: r.h }, // left
-        { x: r.x + r.w - t, y: r.y,           w: t,   h: r.h }, // right
-        { x: r.x,           y: r.y + r.h - t, w: r.w, h: t   }, // bottom
+        // corridor walls
+        { x: cL - t, y: buildingBottomY, w: t, h: CORRIDOR_H + t },
+        { x: cR,     y: buildingBottomY, w: t, h: CORRIDOR_H + t },
+        // end room top wall segments (gap aligns with corridor)
+        { x: endRoomL, y: endRoomTopY, w: cL - t - endRoomL,   h: t },
+        { x: cR + t,   y: endRoomTopY, w: endRoomR - (cR + t), h: t },
+        // end room left wall — split around window
+        { x: endRoomL, y: endRoomTopY,         w: t, h: winL.y - endRoomTopY },
+        { x: endRoomL, y: winL.y + WINDOW_GAP, w: t, h: (endRoomTopY + END_ROOM_H + t) - (winL.y + WINDOW_GAP) },
+        // end room right wall — split around window
+        { x: endRoomR - t, y: endRoomTopY,         w: t, h: winR.y - endRoomTopY },
+        { x: endRoomR - t, y: winR.y + WINDOW_GAP, w: t, h: (endRoomTopY + END_ROOM_H + t) - (winR.y + WINDOW_GAP) },
+        // end room bottom wall — split around window
+        { x: endRoomL,             y: endRoomTopY + END_ROOM_H, w: winB.x - endRoomL,               h: t },
+        { x: winB.x + WINDOW_GAP, y: endRoomTopY + END_ROOM_H, w: endRoomR - (winB.x + WINDOW_GAP), h: t },
     ];
 })();
 walls.push(...extraRoomWalls);
 
 // Door barrier seals the gap; removed from walls[] on unlock
 walls.push(DOOR_BARRIER);
+
+// Extra room windows joined AFTER buildWalls() so they aren't processed as main-building windows
+windows.push(...extraRoomWindows);
+
+// ─── indoor furniture (block walking, bullets, and zombie vision) ─────────────
+const FURNITURE = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    const S = 22; // barrel collision size
+
+    // Cluster of 3 barrels — triangle shape, slightly left of main room centre
+    const bx = b.x + b.w / 2 - 70;
+    const by = b.y + b.h / 2 - 12;
+    const barrels = [
+        { x: bx,      y: by,      w: S, h: S, isFurniture: true },
+        { x: bx + 25, y: by - 15, w: S, h: S, isFurniture: true },
+        { x: bx + 25, y: by + 15, w: S, h: S, isFurniture: true },
+    ];
+
+    // Toppled bookcase flat against the right wall, below its window
+    const bookcase = {
+        x: b.x + b.w - t - 110,
+        y: b.y + 290,
+        w: 110, h: 24,
+        isFurniture: true,
+    };
+
+    // Cluster of 4 barrels in the middle of the extra (bottom) room
+    const r  = EXTRA_ROOM;
+    const ex = (r.endRoomL + r.endRoomR) / 2; // room centre x
+    const ey = r.endRoomTopY + r.END_ROOM_H / 2; // room centre y
+    const extraBarrels = [
+        { x: ex - 11,  y: ey - 30, w: S, h: S, isFurniture: true },
+        { x: ex + 14,  y: ey - 15, w: S, h: S, isFurniture: true },
+        { x: ex - 36,  y: ey - 15, w: S, h: S, isFurniture: true },
+        { x: ex - 11,  y: ey + 10, w: S, h: S, isFurniture: true },
+    ];
+
+    return { barrels, bookcase, extraBarrels };
+})();
+walls.push(...FURNITURE.barrels, FURNITURE.bookcase, ...FURNITURE.extraBarrels);
 
 let extraRoomUnlocked = false;
 let doorProgress      = 0; // 0..1 buy-progress
@@ -327,6 +649,14 @@ function segmentIntersectsAABB(x1, y1, x2, y2, rx, ry, rw, rh) {
     return true;
 }
 
+// Returns true if the straight line between two points is unobstructed by any wall.
+function hasLineOfSight(x1, y1, x2, y2) {
+    for (const w of walls) {
+        if (segmentIntersectsAABB(x1, y1, x2, y2, w.x, w.y, w.w, w.h)) return false;
+    }
+    return true;
+}
+
 // Returns the point just outside the building at a window gap — where a zombie
 // should approach from before entering through the gap.
 function windowApproachPoint(win) {
@@ -336,6 +666,18 @@ function windowApproachPoint(win) {
     if (win.side === 'bottom') return { x: win.x + win.w / 2, y: win.y + t + d };
     if (win.side === 'left')   return { x: win.x - d,         y: win.y + win.h / 2 };
     if (win.side === 'right')  return { x: win.x + t + d,     y: win.y + win.h / 2 };
+    return { x: win.x + win.w / 2, y: win.y + win.h / 2 }; // fallback
+}
+
+// Returns a point just INSIDE the room past the window — zombies walk here
+// after breaking through so they clear the wall gap and stop bunching.
+function windowInteriorPoint(win) {
+    const inset = 50;
+    if (win.side === 'top')    return { x: win.x + win.w / 2, y: win.y + win.h + inset };
+    if (win.side === 'bottom') return { x: win.x + win.w / 2, y: win.y - inset };
+    if (win.side === 'left')   return { x: win.x + win.w + inset, y: win.y + win.h / 2 };
+    if (win.side === 'right')  return { x: win.x - inset,         y: win.y + win.h / 2 };
+    return { x: win.x + win.w / 2, y: win.y + win.h / 2 }; // fallback
 }
 
 // Compute a list of world-space waypoints from (sx, sy) to the window approach
@@ -381,6 +723,90 @@ function computePathToWindow(sx, sy, win) {
         }
     }
     return best || [ap];
+}
+
+// Strategic interior navigation nodes: room corners, door approach, corridor
+// centre-line, and extra-room corners.  A* uses these as the search graph.
+const NAV_WAYPOINTS = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    const R = ZOMBIE_RADIUS + 10; // clearance from walls
+    const { doorCX, buildingBottomY, CORRIDOR_H, endRoomTopY,
+            endRoomL, endRoomR, END_ROOM_H } = EXTRA_ROOM;
+    return [
+        // ── main room interior corners ──
+        { x: b.x + t + R,         y: b.y + t + R         },
+        { x: b.x + b.w - t - R,   y: b.y + t + R         },
+        { x: b.x + t + R,         y: b.y + b.h - t - R   },
+        { x: b.x + b.w - t - R,   y: b.y + b.h - t - R   },
+        // ── door approach (main-room side) ──
+        { x: doorCX, y: b.y + b.h - t - R },
+        // ── corridor centre-line ──
+        { x: doorCX, y: buildingBottomY + R            },
+        { x: doorCX, y: buildingBottomY + CORRIDOR_H - R },
+        // ── extra room entry and corners ──
+        { x: doorCX,                          y: endRoomTopY + R                },
+        { x: endRoomL + t + R,                y: endRoomTopY + R                },
+        { x: endRoomR - t - R,                y: endRoomTopY + R                },
+        { x: endRoomL + t + R,                y: endRoomTopY + END_ROOM_H - R   },
+        { x: endRoomR - t - R,                y: endRoomTopY + END_ROOM_H - R   },
+        { x: (endRoomL + endRoomR) / 2,       y: endRoomTopY + END_ROOM_H / 2   },
+    ];
+})();
+
+// Compute waypoints for a hunting zombie using A* over NAV_WAYPOINTS.
+// Returns [] when the zombie has direct line of sight (walk straight to target).
+function computeHuntWaypoints(zx, zy, tx, ty) {
+    if (hasLineOfSight(zx, zy, tx, ty)) return [];
+
+    const n     = NAV_WAYPOINTS.length;
+    const gCost = new Array(n).fill(Infinity);
+    const prev  = new Array(n).fill(-1);
+    const closed = new Array(n).fill(false);
+    const open   = [];
+
+    // Seed open set with all waypoints visible from the zombie
+    for (let i = 0; i < n; i++) {
+        const wp = NAV_WAYPOINTS[i];
+        if (hasLineOfSight(zx, zy, wp.x, wp.y)) {
+            const g = Math.hypot(wp.x - zx, wp.y - zy);
+            gCost[i] = g;
+            open.push({ idx: i, g, f: g + Math.hypot(tx - wp.x, ty - wp.y) });
+        }
+    }
+
+    while (open.length > 0) {
+        // Pick entry with lowest f (graph is tiny — linear scan is fine)
+        let bi = 0;
+        for (let i = 1; i < open.length; i++) if (open[i].f < open[bi].f) bi = i;
+        const curr = open.splice(bi, 1)[0];
+        if (closed[curr.idx]) continue;
+        closed[curr.idx] = true;
+
+        const cn = NAV_WAYPOINTS[curr.idx];
+
+        // If the target is visible from here, reconstruct and return the path
+        if (hasLineOfSight(cn.x, cn.y, tx, ty)) {
+            const path = [];
+            let idx = curr.idx;
+            while (idx !== -1) { path.unshift(NAV_WAYPOINTS[idx]); idx = prev[idx]; }
+            return path;
+        }
+
+        // Expand to all visible neighbours
+        for (let i = 0; i < n; i++) {
+            if (closed[i]) continue;
+            const nb = NAV_WAYPOINTS[i];
+            if (!hasLineOfSight(cn.x, cn.y, nb.x, nb.y)) continue;
+            const g = curr.g + Math.hypot(nb.x - cn.x, nb.y - cn.y);
+            if (g < gCost[i]) {
+                gCost[i] = g;
+                prev[i] = curr.idx;
+                open.push({ idx: i, g, f: g + Math.hypot(tx - nb.x, ty - nb.y) });
+            }
+        }
+    }
+
+    return []; // no path found — fall back to direct movement
 }
 
 // Returns true if a point (px, py) is inside an AABB rect.
@@ -437,12 +863,13 @@ function setupConnection() {
     });
 
     conn.on('data', (data) => {
+        if (!data || typeof data.type !== 'string') return;
         if (data.type === 'move') {
             remotePeer = data;
         } else if (data.type === 'shoot') {
             // spawn the other player's bullet(s) on our end
             const batch = data.bullets || [{ x: data.x, y: data.y, vx: data.vx, vy: data.vy }];
-            for (const b of batch) remoteBullets.push({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, life: BULLET_LIFE, weaponId: b.weaponId ?? 0 });
+            for (const b of batch) remoteBullets.push(new Bullet(b.x, b.y, b.vx, b.vy, b.weaponId ?? 0));
         } else if (data.type === 'zombies') {
             // joiner receives zombie positions + wave info from host
             remoteZombies = data.zombies;
@@ -459,7 +886,7 @@ function setupConnection() {
             // host receives a hit report from joiner — apply damage to the zombie
             const idx = zombies.findIndex(z => z.id === data.id);
             if (idx !== -1) {
-                zombies[idx].hp--;
+                zombies[idx].hp -= data.damage ?? 1;
                 if (zombies[idx].hp <= 0) {
                     const zx = zombies[idx].x, zy = zombies[idx].y;
                     zombies.splice(idx, 1);
@@ -564,29 +991,43 @@ function tryFire() {
     const by = player.y + Math.sin(player.angle) * GUN_TIP_X + Math.cos(player.angle) * GUN_TIP_Y;
 
     const spd = wDef.bulletSpeed || BULLET_SPEED;
+    const effectiveSpread = wDef.spread + (wDef.bloomPerShot ? fireBloom : 0);
     const newBullets = [];
     for (let i = 0; i < wDef.pellets; i++) {
-        const a = player.angle + (Math.random() - 0.5) * wDef.spread;
-        newBullets.push({ x: bx, y: by, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: BULLET_LIFE, weaponId: wDef.id });
+        const a = player.angle + (Math.random() - 0.5) * effectiveSpread;
+        newBullets.push(new Bullet(bx, by, Math.cos(a) * spd, Math.sin(a) * spd, wDef.id));
     }
     bullets.push(...newBullets);
     magAmmo--;
     weaponCooldown = wDef.cooldown;
+
+    // build bloom after each shot
+    if (wDef.bloomPerShot) {
+        fireBloom = Math.min(wDef.maxBloom, fireBloom + wDef.bloomPerShot);
+        firstShotCooldown = wDef.firstShotCooldown;
+    }
 
     if (conn && conn.open) {
         conn.send({ type: 'shoot', bullets: newBullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, weaponId: b.weaponId })) });
     }
 }
 
-canvas.addEventListener('mousedown', () => { mouseHeld = true;  tryFire(); });
-canvas.addEventListener('mouseup',   () => { mouseHeld = false; });
+canvas.addEventListener('mousedown', () => {
+    mouseHeld = true;
+    // first shot is always perfect — reset bloom unless the cooldown is still active
+    if (firstShotCooldown <= 0) fireBloom = 0;
+    tryFire();
+});
+canvas.addEventListener('mouseup', () => { mouseHeld = false; });
 
 // ─── update ───────────────────────────────────────────────────────────────────
 
 function updatePlayer(dt) {
+    moveSyncTimer -= dt;
     if (playerDead) {
         // still broadcast dead state so the other player and zombies know
-        if (conn && conn.open) {
+        if (moveSyncTimer <= 0 && conn && conn.open) {
+            moveSyncTimer = 1 / 60;
             conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, weaponId: inventory[currentWeapon], dead: true });
         }
         return;
@@ -617,7 +1058,10 @@ function updatePlayer(dt) {
     const worldMouseY = mouse.y + camera.y;
     player.angle = Math.atan2(worldMouseY - player.y, worldMouseX - player.x);
 
-    if (weaponCooldown > 0) weaponCooldown -= dt;
+    weaponCooldown    = Math.max(0, weaponCooldown - dt);
+    firstShotCooldown = Math.max(0, firstShotCooldown - dt);
+    if (!mouseHeld && curWeaponDef().bloomDecay)
+        fireBloom = Math.max(0, fireBloom - curWeaponDef().bloomDecay * dt);
 
     if (reloading) {
         reloadTimer -= dt;
@@ -680,8 +1124,9 @@ function updatePlayer(dt) {
     // auto-fire while mouse held (machine gun and any other autoFire weapons)
     if (mouseHeld && curWeaponDef().autoFire) tryFire();
 
-    // send position + current weapon to the other player
-    if (conn && conn.open) {
+    // send position + current weapon to the other player (~60 Hz)
+    if (moveSyncTimer <= 0 && conn && conn.open) {
+        moveSyncTimer = 1 / 60;
         conn.send({ type: 'move', x: player.x, y: player.y, angle: player.angle, weapon: currentWeapon, weaponId: inventory[currentWeapon], dead: playerDead, name: localPlayerName });
     }
 }
@@ -721,20 +1166,8 @@ function spawnRaygunExplosion(x, y, rewardMoney = true) {
 }
 
 function spawnParticles(x, y, color, count, dirAngle) {
-    const spread = Math.PI * 0.6; // ±54° cone
     for (let i = 0; i < count; i++) {
-        const a = dirAngle !== undefined
-            ? dirAngle + (Math.random() - 0.5) * spread
-            : Math.random() * Math.PI * 2;
-        const speed = 150 + Math.random() * 250;
-        particles.push({
-            x, y,
-            vx: Math.cos(a) * speed,
-            vy: Math.sin(a) * speed,
-            life: 0.12 + Math.random() * 0.12,
-            maxLife: 0.24,
-            color,
-        });
+        particles.push(new Particle(x, y, color, dirAngle));
     }
 }
 
@@ -755,10 +1188,22 @@ const SHOTGUN_PICKUP = (() => {
 
 let shotgunBuyProgress = 0; // 0..1 while holding F near pickup
 
+// ─── uzi wall pickup ──────────────────────────────────────────────────────────
+// on the left wall, upper section (above the left-wall window)
+const UZI_PICKUP = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    // left window sits at y = b.y + b.h - WINDOW_GAP - 100; place uzi halfway above it
+    const midY = b.y + (b.h - 55 - 100) / 2 - 18;
+    return { x: b.x, y: midY, w: t, h: 36 };
+})();
+
+let uziBuyProgress = 0; // 0..1 while holding F near pickup
+
 // ─── mystery box ──────────────────────────────────────────────────────────────
 const MYSTERY_BOX = (() => {
-    const b = BUILDING, t = b.wallThickness;
-    return { x: b.x + b.w - t - 52, y: b.y + b.h - t - 52, w: 32, h: 32, cost: 200 };
+    const r = EXTRA_ROOM, t = r.wallThickness;
+    // top-right corner of the bottom room interior
+    return { x: r.endRoomR - t - 48, y: r.endRoomTopY + t + 12, w: 32, h: 32, cost: 200 };
 })();
 
 let mysteryBoxProgress = 0;  // 0..1 hold-F progress
@@ -774,7 +1219,7 @@ function applyAddPlank(winIndex) {
 }
 
 function updateBarricadeRepair(dt) {
-    const holding = keys['f'] || keys['F'];
+    const holding = isHoldingF();
     let nearWin = null;
     let nearWinIdx = -1;
 
@@ -829,7 +1274,7 @@ function updateMysteryBox(dt) {
     const cx   = mb.x + mb.w / 2;
     const cy   = mb.y + mb.h / 2;
     const dist = Math.hypot(player.x - cx, player.y - cy);
-    const holding = keys['f'] || keys['F'];
+    const holding = isHoldingF();
 
     if (dist < BARRICADE_RANGE && holding) {
         mysteryBoxProgress = Math.min(1, mysteryBoxProgress + dt / 1.5);
@@ -839,28 +1284,24 @@ function updateMysteryBox(dt) {
             money -= mb.cost;
             mysteryBoxOpened = true;
             const roll = Math.random();
-            if (roll < 0.4) {
-                // ray gun
+            // 10% ray gun | 20% shotgun | 30% machine gun | 20% uzi | 20% teddy bear
+            const prize = roll < 0.10 ? 2
+                        : roll < 0.30 ? 1
+                        : roll < 0.60 ? 3
+                        : roll < 0.80 ? 4
+                        : -1; // teddy bear
+            if (prize !== -1) {
                 let targetSlot = inventory.indexOf(-1);
                 if (targetSlot === -1) targetSlot = currentWeapon;
-                inventory[targetSlot]   = 2;
-                savedAmmo[targetSlot]   = WEAPON_DEFS[2].magSize;
-                reserveAmmo[targetSlot] = WEAPON_DEFS[2].reserve;
-                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[2].magSize; reloading = false; reloadTimer = 0; }
+                inventory[targetSlot]   = prize;
+                savedAmmo[targetSlot]   = WEAPON_DEFS[prize].magSize;
+                reserveAmmo[targetSlot] = WEAPON_DEFS[prize].reserve;
+                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[prize].magSize; reloading = false; reloadTimer = 0; }
                 switchWeapon(targetSlot);
-                mysteryBoxResult = { text: 'RAY GUN!', color: '#40ff60', timer: 2.5 };
-            } else if (roll < 0.8) {
-                // machine gun
-                let targetSlot = inventory.indexOf(-1);
-                if (targetSlot === -1) targetSlot = currentWeapon;
-                inventory[targetSlot]   = 3;
-                savedAmmo[targetSlot]   = WEAPON_DEFS[3].magSize;
-                reserveAmmo[targetSlot] = WEAPON_DEFS[3].reserve;
-                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[3].magSize; reloading = false; reloadTimer = 0; }
-                switchWeapon(targetSlot);
-                mysteryBoxResult = { text: 'MACHINE GUN!', color: '#e8c020', timer: 2.5 };
+                const labels = { 1: ['SHOTGUN!', '#e8c020'], 2: ['RAY GUN!', '#40ff60'], 3: ['MACHINE GUN!', '#e8c020'], 4: ['UZI!', '#40c8ff'] };
+                const [text, color] = labels[prize];
+                mysteryBoxResult = { text, color, timer: 2.5 };
             } else {
-                // teddy bear — does nothing
                 mysteryBoxResult = { text: 'TEDDY BEAR!', color: '#c8843a', timer: 2.5 };
             }
         }
@@ -875,7 +1316,7 @@ function updateExtraRoomDoor(dt) {
     const cx   = db.x + db.w / 2;
     const cy   = db.y + db.h / 2;
     const dist = Math.hypot(player.x - cx, player.y - cy);
-    const holding = keys['f'] || keys['F'];
+    const holding = isHoldingF();
 
     if (dist < BARRICADE_RANGE && holding) {
         if (money >= DOOR_COST) {
@@ -900,17 +1341,15 @@ function unlockExtraRoom() {
 
 function drawExtraRoom() {
     const r = EXTRA_ROOM, t = r.wallThickness;
+    const { doorCX, buildingBottomY, CORRIDOR_H, END_ROOM_W, END_ROOM_H, endRoomL, endRoomTopY } = r;
+    const cL = doorCX - DOOR_GAP / 2;
 
-    // interior floor (slightly different shade to distinguish from main building)
+    // corridor floor (narrow strip below the door)
     ctx.fillStyle = '#202020';
-    ctx.fillRect(r.x + t, r.y, r.w - t * 2, r.h - t);
+    ctx.fillRect(cL, buildingBottomY, DOOR_GAP, CORRIDOR_H);
 
-    // perimeter walls
-    ctx.fillStyle = '#2a2a2a';
-    for (const w of extraRoomWalls) ctx.fillRect(w.x, w.y, w.w, w.h);
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 2;
-    for (const w of extraRoomWalls) ctx.strokeRect(w.x, w.y, w.w, w.h);
+    // end room floor (wider area at the bottom of the corridor)
+    ctx.fillRect(endRoomL + t, endRoomTopY + t, END_ROOM_W - t * 2, END_ROOM_H - t);
 
     // door — wooden panels when locked, open gap when unlocked
     const db = DOOR_BARRIER;
@@ -995,32 +1434,54 @@ function drawMysteryBox() {
 }
 
 function updateWeaponPickup(dt) {
-    const sp   = SHOTGUN_PICKUP;
-    const cx   = sp.x + sp.w / 2;
-    const cy   = sp.y + sp.h / 2;
-    const dist = Math.hypot(player.x - cx, player.y - cy);
-    const near = dist < BARRICADE_RANGE;
-    const holding = keys['f'] || keys['F'];
-    // only offer pickup if player doesn't already own the shotgun
-    const alreadyOwned = inventory.includes(1);
+    const holding = isHoldingF();
 
-    if (near && holding && !alreadyOwned) {
-        shotgunBuyProgress = Math.min(1, shotgunBuyProgress + dt / 1.5);
-        if (shotgunBuyProgress >= 1) {
-            shotgunBuyProgress = 0;
-            if (money < WEAPON_DEFS[1].cost) return; // can't afford
-            money -= WEAPON_DEFS[1].cost;
-            // find first empty slot; if none, replace current slot
-            let targetSlot = inventory.indexOf(-1);
-            if (targetSlot === -1) targetSlot = currentWeapon;
-            inventory[targetSlot]   = 1;
-            savedAmmo[targetSlot]   = WEAPON_DEFS[1].magSize;
-            reserveAmmo[targetSlot] = WEAPON_DEFS[1].reserve;
-            if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[1].magSize; reloading = false; reloadTimer = 0; }
-            switchWeapon(targetSlot);
+    // ── shotgun ──
+    {
+        const sp  = SHOTGUN_PICKUP;
+        const cx  = sp.x + sp.w / 2, cy = sp.y + sp.h / 2;
+        const near = Math.hypot(player.x - cx, player.y - cy) < BARRICADE_RANGE;
+        if (near && holding && !inventory.includes(1)) {
+            shotgunBuyProgress = Math.min(1, shotgunBuyProgress + dt / 1.5);
+            if (shotgunBuyProgress >= 1) {
+                shotgunBuyProgress = 0;
+                if (money < WEAPON_DEFS[1].cost) return;
+                money -= WEAPON_DEFS[1].cost;
+                let targetSlot = inventory.indexOf(-1);
+                if (targetSlot === -1) targetSlot = currentWeapon;
+                inventory[targetSlot]   = 1;
+                savedAmmo[targetSlot]   = WEAPON_DEFS[1].magSize;
+                reserveAmmo[targetSlot] = WEAPON_DEFS[1].reserve;
+                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[1].magSize; reloading = false; reloadTimer = 0; }
+                switchWeapon(targetSlot);
+            }
+        } else {
+            shotgunBuyProgress = Math.max(0, shotgunBuyProgress - dt * 3);
         }
-    } else {
-        shotgunBuyProgress = Math.max(0, shotgunBuyProgress - dt * 3);
+    }
+
+    // ── uzi ──
+    {
+        const up  = UZI_PICKUP;
+        const cx  = up.x + up.w / 2, cy = up.y + up.h / 2;
+        const near = Math.hypot(player.x - cx, player.y - cy) < BARRICADE_RANGE;
+        if (near && holding && !inventory.includes(4)) {
+            uziBuyProgress = Math.min(1, uziBuyProgress + dt / 1.5);
+            if (uziBuyProgress >= 1) {
+                uziBuyProgress = 0;
+                if (money < WEAPON_DEFS[4].cost) return;
+                money -= WEAPON_DEFS[4].cost;
+                let targetSlot = inventory.indexOf(-1);
+                if (targetSlot === -1) targetSlot = currentWeapon;
+                inventory[targetSlot]   = 4;
+                savedAmmo[targetSlot]   = WEAPON_DEFS[4].magSize;
+                reserveAmmo[targetSlot] = WEAPON_DEFS[4].reserve;
+                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[4].magSize; reloading = false; reloadTimer = 0; }
+                switchWeapon(targetSlot);
+            }
+        } else {
+            uziBuyProgress = Math.max(0, uziBuyProgress - dt * 3);
+        }
     }
 }
 
@@ -1133,7 +1594,7 @@ function drawGroundMarks() {
 }
 
 function applyMaxAmmo() {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < inventory.length; i++) {
         if (inventory[i] === -1) continue;
         const wDef = WEAPON_DEFS[inventory[i]];
         savedAmmo[i] = wDef.magSize;
@@ -1217,13 +1678,8 @@ function drawPlankDebris() {
 
 function updateParticles(dt) {
     for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.vx *= 0.82;
-        p.vy *= 0.82;
-        p.life -= dt;
-        if (p.life <= 0) particles.splice(i, 1);
+        particles[i].update(dt);
+        if (!particles[i].alive) particles.splice(i, 1);
     }
 }
 
@@ -1237,16 +1693,13 @@ function bulletHitsWall(b) {
 function updateBullets(dt) {
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        b.life -= dt;
-        if (b.life <= 0 || b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) {
+        b.update(dt);
+        if (!b.alive) {
             bullets.splice(i, 1);
             continue;
         }
-        const isRaygun = b.weaponId === 2;
         if (bulletHitsWall(b)) {
-            if (isRaygun) spawnRaygunExplosion(b.x, b.y);
+            if (b.weaponId === 2) spawnRaygunExplosion(b.x, b.y);
             else spawnParticles(b.x, b.y, '#f5e642', 8, Math.atan2(b.vy, b.vx) + Math.PI);
             bullets.splice(i, 1);
             continue;
@@ -1258,10 +1711,10 @@ function updateBullets(dt) {
                 const z = zombies[j];
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < ZOMBIE_RADIUS * ZOMBIE_RADIUS) {
-                    if (isRaygun) {
+                    if (b.weaponId === 2) {
                         spawnRaygunExplosion(b.x, b.y);
                     } else {
-                        z.hp--;
+                        z.hp -= b.weaponId === 3 ? 2 : 1;
                         if (z.hp <= 0) {
                             const zx = z.x, zy = z.y;
                             zombies.splice(j, 1);
@@ -1280,15 +1733,15 @@ function updateBullets(dt) {
                 const z = remoteZombies[j];
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < ZOMBIE_RADIUS * ZOMBIE_RADIUS) {
-                    if (isRaygun) spawnRaygunExplosion(b.x, b.y);
-                    else if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id });
+                    if (b.weaponId === 2) spawnRaygunExplosion(b.x, b.y);
+                    else if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: b.weaponId === 3 ? 2 : 1 });
                     zombieHit = true;
                     break;
                 }
             }
         }
         if (zombieHit) {
-            if (!isRaygun) spawnParticles(b.x, b.y, '#cc2020', 8, Math.atan2(b.vy, b.vx) + Math.PI);
+            if (b.weaponId !== 2) spawnParticles(b.x, b.y, '#cc2020', 8, Math.atan2(b.vy, b.vx) + Math.PI);
             bullets.splice(i, 1);
             continue;
         }
@@ -1304,10 +1757,8 @@ function updateBullets(dt) {
     }
     for (let i = remoteBullets.length - 1; i >= 0; i--) {
         const b = remoteBullets[i];
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        b.life -= dt;
-        if (b.life <= 0 || b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) {
+        b.update(dt);
+        if (!b.alive) {
             remoteBullets.splice(i, 1);
             continue;
         }
@@ -1341,44 +1792,37 @@ function updateBullets(dt) {
     }
 }
 
-// Returns the closest window to (sx, sy) that has a clear line of sight
-// (no building between spawn and the window approach point).
-// Falls back to the closest window overall if none have clear LOS.
-function pickWindowForSpawn(sx, sy) {
-    const b  = BUILDING;
-    const pad = ZOMBIE_RADIUS + 20;
-    const rx = b.x - pad, ry = b.y - pad, rw = b.w + pad * 2, rh = b.h + pad * 2;
-
-    let bestWin = null, bestDist = Infinity;
-    for (const win of windows) {
-        const ap = windowApproachPoint(win);
-        if (!segmentIntersectsAABB(sx, sy, ap.x, ap.y, rx, ry, rw, rh)) {
-            const d = Math.hypot(ap.x - sx, ap.y - sy);
-            if (d < bestDist) { bestDist = d; bestWin = win; }
-        }
-    }
-    // fallback: no clear LOS to any window — just pick the nearest
-    if (!bestWin) {
-        for (const win of windows) {
-            const ap = windowApproachPoint(win);
-            const d = Math.hypot(ap.x - sx, ap.y - sy);
-            if (d < bestDist) { bestDist = d; bestWin = win; }
-        }
-    }
-    return bestWin;
-}
 
 function spawnZombie() {
-    // pick a random point on the world edge
     const margin = ZOMBIE_RADIUS + 4;
-    let sx, sy;
-    const edge = Math.floor(Math.random() * 4); // 0=top 1=bottom 2=left 3=right
-    if (edge === 0) { sx = Math.random() * WORLD_W; sy = margin; }
-    else if (edge === 1) { sx = Math.random() * WORLD_W; sy = WORLD_H - margin; }
-    else if (edge === 2) { sx = margin; sy = Math.random() * WORLD_H; }
-    else               { sx = WORLD_W - margin; sy = Math.random() * WORLD_H; }
 
-    const win = pickWindowForSpawn(sx, sy);
+    // Pick the target window first, then spawn on the edge that faces it.
+    // This guarantees the zombie has direct line of sight and never needs
+    // to route around the building.
+    const available = extraRoomUnlocked
+        ? windows
+        : windows.filter(w => !extraRoomWindows.includes(w));
+    const win = available[Math.floor(Math.random() * available.length)];
+    const ap  = windowApproachPoint(win);
+
+    // Spawn at a random position along the world edge that faces the approach point,
+    // biased toward the approach point's axis position (±400 px spread).
+    const spread = 400;
+    let sx, sy;
+    if (win.side === 'top') {
+        sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x + (Math.random() - 0.5) * spread));
+        sy = margin;
+    } else if (win.side === 'bottom') {
+        sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x + (Math.random() - 0.5) * spread));
+        sy = WORLD_H - margin;
+    } else if (win.side === 'left') {
+        sx = margin;
+        sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y + (Math.random() - 0.5) * spread));
+    } else { // right
+        sx = WORLD_W - margin;
+        sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y + (Math.random() - 0.5) * spread));
+    }
+
     const z = new Zombie(sx, sy, win);
     z.waypoints = computePathToWindow(sx, sy, win);
     zombies.push(z);
@@ -1420,78 +1864,103 @@ function updateZombies(dt) {
     // ── update each zombie ──
     for (const z of zombies) {
         if (z.state === 'toWindow') {
-            // follow pre-computed waypoints; final destination is window centre
-            let tx, ty;
-            if (z.waypoints.length > 0) {
-                tx = z.waypoints[0].x;
-                ty = z.waypoints[0].y;
-            } else {
-                tx = z.targetWindow.x + z.targetWindow.w / 2;
-                ty = z.targetWindow.y + z.targetWindow.h / 2;
-            }
-            const dx = tx - z.x, dy = ty - z.y;
+            // ── follow waypoints toward the window approach point ──
+            if (z.waypoints.length === 0) { z.state = 'hunting'; continue; }
+            const wp = z.waypoints[0];
+            const dx = wp.x - z.x, dy = wp.y - z.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
             if (dist < 8) {
-                if (z.waypoints.length > 0) {
-                    z.waypoints.shift(); // advance to next waypoint
-                    // just reached the approach point — attack if planks remain
-                    if (z.waypoints.length === 0 && z.targetWindow.planks > 0) {
+                z.waypoints.shift();
+                if (z.waypoints.length === 0) {
+                    // reached the approach point
+                    if (z.targetWindow.planks > 0) {
                         z.state       = 'attacking';
                         z.attackTimer = PLANK_ATTACK_TIME;
+                    } else {
+                        // window already open — pass through to interior
+                        z.state     = 'entering';
+                        z.waypoints = [windowInteriorPoint(z.targetWindow)];
                     }
-                } else {
-                    z.state = 'hunting';
                 }
             } else {
                 z.angle = Math.atan2(dy, dx);
                 z.x += (dx / dist) * z.speed * dt;
                 z.y += (dy / dist) * z.speed * dt;
             }
-            // zombies collide with walls but walk freely through window gaps
             for (const wall of walls) resolveCircleRect(z, ZOMBIE_RADIUS, wall);
 
         } else if (z.state === 'attacking') {
-            // destroy planks one at a time then walk through
+            // ── destroy planks one at a time, then enter ──
             z.attackTimer -= dt;
             if (z.attackTimer <= 0) {
                 const win = z.targetWindow;
                 win.planks = Math.max(0, win.planks - 1);
-                // outward direction: away from building toward the zombie
                 const outAngles = { top: -Math.PI/2, bottom: Math.PI/2, left: Math.PI, right: 0 };
                 const outDir = outAngles[win.side];
                 spawnPlankDebris(win, outDir);
-                // tell the joiner to spawn the same debris effect
                 if (conn && conn.open) {
                     conn.send({ type: 'plankDebris', windowIndex: windows.indexOf(win), outDir });
                 }
                 if (win.planks === 0) {
-                    z.state = 'toWindow'; // waypoints empty — will walk straight to window centre
+                    z.state     = 'entering';
+                    z.waypoints = [windowInteriorPoint(win)];
                 } else {
                     z.attackTimer = PLANK_ATTACK_TIME;
                 }
             }
 
+        } else if (z.state === 'entering') {
+            // ── walk to the interior rally point then start hunting ──
+            if (z.waypoints.length === 0) { z.state = 'hunting'; z.huntTimer = 0; continue; }
+            const wp = z.waypoints[0];
+            const dx = wp.x - z.x, dy = wp.y - z.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+            if (dist < 8) {
+                z.waypoints.shift();
+                if (z.waypoints.length === 0) { z.state = 'hunting'; z.huntTimer = 0; }
+            } else {
+                z.angle = Math.atan2(dy, dx);
+                z.x += (dx / dist) * z.speed * dt;
+                z.y += (dy / dist) * z.speed * dt;
+            }
+            for (const wall of walls) resolveCircleRect(z, ZOMBIE_RADIUS, wall);
+
         } else if (z.state === 'hunting') {
-            // move toward nearest living player
+            // ── chase nearest player, routing around the building if needed ──
             const targets = [];
             if (!playerDead) targets.push(player);
             if (remotePeer && !remotePeer.dead) targets.push(remotePeer);
-            if (targets.length === 0) continue; // all dead — stand still
-            let nearestDist = Infinity, tx = targets[0].x, ty = targets[0].y;
+            if (targets.length === 0) continue;
+
+            let nearestDist = Infinity, nearestTarget = targets[0];
             for (const t of targets) {
                 const d = Math.hypot(t.x - z.x, t.y - z.y);
-                if (d < nearestDist) { nearestDist = d; tx = t.x; ty = t.y; }
+                if (d < nearestDist) { nearestDist = d; nearestTarget = t; }
             }
+
+            // Refresh route every 1.2 s so zombies adapt as players move
+            z.huntTimer -= dt;
+            if (z.huntTimer <= 0) {
+                z.huntTimer    = 0.4;
+                z.huntWaypoints = computeHuntWaypoints(z.x, z.y, nearestTarget.x, nearestTarget.y);
+            }
+
+            // Advance along any routing corners
+            while (z.huntWaypoints.length > 0 &&
+                   Math.hypot(z.huntWaypoints[0].x - z.x, z.huntWaypoints[0].y - z.y) < 12) {
+                z.huntWaypoints.shift();
+            }
+
+            const tx = z.huntWaypoints.length > 0 ? z.huntWaypoints[0].x : nearestTarget.x;
+            const ty = z.huntWaypoints.length > 0 ? z.huntWaypoints[0].y : nearestTarget.y;
             const dx = tx - z.x, dy = ty - z.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
             z.angle = Math.atan2(dy, dx);
             z.x += (dx / dist) * z.speed * dt;
             z.y += (dy / dist) * z.speed * dt;
 
-            // wall collision (not window — zombies can pass through gaps)
             for (const wall of walls) resolveCircleRect(z, ZOMBIE_RADIUS, wall);
 
-            // damage local player on contact (host only — joiner handled separately)
             if (!playerDead) {
                 const pdx = z.x - player.x, pdy = z.y - player.y;
                 if (pdx * pdx + pdy * pdy < (ZOMBIE_RADIUS + PLAYER_RADIUS) * (ZOMBIE_RADIUS + PLAYER_RADIUS)) {
@@ -1568,28 +2037,93 @@ function drawFloor() {
     ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 }
 
-function drawGrid() {
-    const tileSize = 64;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-    ctx.lineWidth = 1;
-    const startX = Math.floor(camera.x / tileSize) * tileSize;
-    const startY = Math.floor(camera.y / tileSize) * tileSize;
-    ctx.beginPath();
-    for (let x = startX; x < camera.x + canvas.width + tileSize && x <= WORLD_W; x += tileSize) {
-        ctx.moveTo(x, camera.y);
-        ctx.lineTo(x, camera.y + canvas.height);
-    }
-    for (let y = startY; y < camera.y + canvas.height + tileSize && y <= WORLD_H; y += tileSize) {
-        ctx.moveTo(camera.x, y);
-        ctx.lineTo(camera.x + canvas.width, y);
-    }
-    ctx.stroke();
-}
-
 function drawWorldBorder() {
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 6;
     ctx.strokeRect(3, 3, WORLD_W - 6, WORLD_H - 6);
+}
+
+function drawFurniture() {
+    ctx.save();
+
+    // ── barrels ──────────────────────────────────────────────────────────────
+    for (const rect of [...FURNITURE.barrels, ...FURNITURE.extraBarrels]) {
+        const cx = rect.x + rect.w / 2;
+        const cy = rect.y + rect.h / 2;
+        const r  = rect.w / 2;
+
+        // body
+        ctx.fillStyle = '#3d2b0e';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // metal bands
+        ctx.strokeStyle = '#6a6a6a';
+        ctx.lineWidth = 2.5;
+        for (const oy of [-r * 0.38, r * 0.38]) {
+            const hw = Math.sqrt(Math.max(0, r * r - oy * oy));
+            ctx.beginPath();
+            ctx.moveTo(cx - hw, cy + oy);
+            ctx.lineTo(cx + hw, cy + oy);
+            ctx.stroke();
+        }
+
+        // top vent / rim
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.32, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#6a6a6a';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // subtle highlight
+        ctx.fillStyle = 'rgba(255,200,80,0.10)';
+        ctx.beginPath();
+        ctx.arc(cx - r * 0.28, cy - r * 0.28, r * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ── toppled bookcase ─────────────────────────────────────────────────────
+    {
+        const r = FURNITURE.bookcase;
+
+        // wood back panel
+        ctx.fillStyle = '#4a2e10';
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+
+        // book spines — colourful vertical strips
+        const spineColors = ['#8b1a1a','#1a5c8b','#2a7a3a','#7a6a10','#5a1a8b','#8b4010','#1a7a6a'];
+        const spineW = 12;
+        const margin = 4;
+        let sx = r.x + margin;
+        let ci = 0;
+        while (sx + spineW <= r.x + r.w - margin) {
+            ctx.fillStyle = spineColors[ci % spineColors.length];
+            ctx.fillRect(sx, r.y + 3, spineW - 2, r.h - 6);
+            // thin dark gap between spines
+            ctx.fillStyle = '#111';
+            ctx.fillRect(sx + spineW - 2, r.y + 3, 2, r.h - 6);
+            sx += spineW;
+            ci++;
+        }
+
+        // wood frame outline
+        ctx.strokeStyle = '#2a1a08';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+        // top-edge highlight (suggests the front edge of the case)
+        ctx.strokeStyle = 'rgba(255,200,120,0.18)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(r.x + 1, r.y + 1);
+        ctx.lineTo(r.x + r.w - 1, r.y + 1);
+        ctx.stroke();
+    }
+
+    ctx.restore();
 }
 
 function drawBuilding() {
@@ -1600,14 +2134,16 @@ function drawBuilding() {
     ctx.fillStyle = '#252525';
     ctx.fillRect(b.x + t, b.y + t, b.w - t * 2, b.h - t * 2);
 
-    // solid wall rects
+    // solid wall rects (furniture drawn separately)
     ctx.fillStyle = '#2a2a2a';
     for (const wall of walls) {
+        if (wall.isFurniture) continue;
         ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
     }
     ctx.strokeStyle = '#444';
     ctx.lineWidth = 2;
     for (const wall of walls) {
+        if (wall.isFurniture) continue;
         ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
     }
 
@@ -1621,15 +2157,8 @@ function drawBuilding() {
         {
             const cx = win.x + win.w / 2;
             const cy = win.y + win.h / 2;
-            const diagLen = Math.hypot(win.w, win.h) + 4;
-            const crossLen = Math.max(win.w, win.h) + 4;
             const thickness = 6;
-            // plank definitions. Index 2 = first destroyed, 0 = last to survive
-            const plankDefs = [
-                { angle: Math.atan2(win.h, win.w),  len: diagLen },
-                { angle: Math.atan2(-win.h, win.w), len: diagLen },
-                { angle: win.w >= win.h ? 0 : Math.PI / 2, len: crossLen },
-            ];
+            const plankDefs = win.plankDefs;
 
             ctx.save();
             ctx.beginPath();
@@ -1689,66 +2218,8 @@ function drawCharacter(x, y, angle, bodyColor, weaponId) {
     ctx.translate(x, y);
     ctx.rotate(angle);
 
-    // weapon — drawn first so it sits behind the body
-    if (weaponId === 0) {
-        // pistol
-        ctx.fillStyle = '#111';
-        ctx.fillRect(2, 7, 16, 5);
-    } else if (weaponId === 1) {
-        // shotgun — wooden stock, receiver, twin barrels
-        ctx.fillStyle = '#6b4a0f';
-        ctx.fillRect(-1, 7, 5, 7);    // stock
-        ctx.fillStyle = '#444';
-        ctx.fillRect(4, 6, 5, 9);     // receiver
-        ctx.fillStyle = '#555';
-        ctx.fillRect(9, 6, 13, 4);    // barrel 1
-        ctx.fillRect(9, 11, 13, 4);   // barrel 2
-    } else if (weaponId === 2) {
-        // ray gun — purple body, glowing green emitter
-        ctx.fillStyle = '#3a2060';
-        ctx.fillRect(0, 7, 8, 7);     // grip/body
-        ctx.fillStyle = '#7050cc';
-        ctx.fillRect(8, 8, 10, 6);    // barrel
-        ctx.save();
-        ctx.shadowColor = '#40ff60';
-        ctx.shadowBlur  = 8;
-        ctx.fillStyle   = '#60ffaa';
-        ctx.beginPath();
-        ctx.arc(19, 11, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    } else if (weaponId === 3) {
-        // AK-47
-        // wooden stock
-        ctx.fillStyle = '#8B5E1A';
-        ctx.fillRect(-7, 7, 7, 6);
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillRect(-7, 7, 1.5, 6);  // butt plate
-        // receiver (dark metal)
-        ctx.fillStyle = '#252525';
-        ctx.fillRect(0, 6, 11, 8);
-        // banana magazine — trapezoid shape curves slightly forward
-        ctx.fillStyle = '#1a1a1a';
-        ctx.beginPath();
-        ctx.moveTo(1.5, 14);
-        ctx.lineTo(8,   14);
-        ctx.lineTo(9.5, 21);
-        ctx.lineTo(3,   21);
-        ctx.closePath();
-        ctx.fill();
-        // wooden handguard around barrel
-        ctx.fillStyle = '#8B5E1A';
-        ctx.fillRect(11, 8, 9, 5);
-        // gas tube above barrel
-        ctx.fillStyle = '#383838';
-        ctx.fillRect(11, 6, 17, 2);
-        // barrel
-        ctx.fillStyle = '#3a3a3a';
-        ctx.fillRect(20, 8.5, 10, 3);
-        // muzzle / flash hider
-        ctx.fillStyle = '#555';
-        ctx.fillRect(29, 7.5, 3, 5);
-    }
+    // weapon model — drawn first so it sits behind the body
+    WEAPON_DEFS[weaponId]?.drawModel();
 
     // body
     ctx.fillStyle = bodyColor;
@@ -1784,31 +2255,26 @@ function drawPlayerName(x, y, name, color) {
     ctx.restore();
 }
 
+function drawDeadCharacter(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#555';
+    ctx.beginPath(); ctx.ellipse(0, 0, 10, 14, 0, 0, Math.PI * 2); ctx.fill(); // body
+    ctx.fillStyle = '#888';
+    ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill(); // head
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#cc2020'; ctx.lineWidth = 1.5;
+    for (const [ox, oy] of [[-2.5, -1.5], [2.5, -1.5]]) {
+        ctx.beginPath(); ctx.moveTo(ox - 1.5, oy - 1.5); ctx.lineTo(ox + 1.5, oy + 1.5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ox + 1.5, oy - 1.5); ctx.lineTo(ox - 1.5, oy + 1.5); ctx.stroke();
+    }
+    ctx.restore();
+}
+
 function drawPlayer() {
     if (playerDead) {
-        // draw flat grey corpse with red X eyes
-        ctx.save();
-        ctx.translate(player.x, player.y);
-        ctx.globalAlpha = 0.7;
-        // body
-        ctx.fillStyle = '#555';
-        ctx.beginPath();
-        ctx.ellipse(0, 0, 10, 14, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // head
-        ctx.fillStyle = '#888';
-        ctx.beginPath();
-        ctx.arc(0, 0, 6, 0, Math.PI * 2);
-        ctx.fill();
-        // red X eyes
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#cc2020';
-        ctx.lineWidth = 1.5;
-        for (const [ox, oy] of [[-2.5, -1.5], [2.5, -1.5]]) {
-            ctx.beginPath(); ctx.moveTo(ox - 1.5, oy - 1.5); ctx.lineTo(ox + 1.5, oy + 1.5); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(ox + 1.5, oy - 1.5); ctx.lineTo(ox - 1.5, oy + 1.5); ctx.stroke();
-        }
-        ctx.restore();
+        drawDeadCharacter(player.x, player.y);
         drawPlayerName(player.x, player.y, localPlayerName, '#cc2020');
         return;
     }
@@ -1819,25 +2285,7 @@ function drawPlayer() {
 function drawRemotePlayer() {
     if (!remotePeer) return;
     if (remotePeer.dead) {
-        ctx.save();
-        ctx.translate(remotePeer.x, remotePeer.y);
-        ctx.globalAlpha = 0.7;
-        ctx.fillStyle = '#555';
-        ctx.beginPath();
-        ctx.ellipse(0, 0, 10, 14, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#888';
-        ctx.beginPath();
-        ctx.arc(0, 0, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#cc2020';
-        ctx.lineWidth = 1.5;
-        for (const [ox, oy] of [[-2.5, -1.5], [2.5, -1.5]]) {
-            ctx.beginPath(); ctx.moveTo(ox - 1.5, oy - 1.5); ctx.lineTo(ox + 1.5, oy + 1.5); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(ox + 1.5, oy - 1.5); ctx.lineTo(ox - 1.5, oy + 1.5); ctx.stroke();
-        }
-        ctx.restore();
+        drawDeadCharacter(remotePeer.x, remotePeer.y);
         drawPlayerName(remotePeer.x, remotePeer.y, remotePeer.name ?? 'Player', '#cc2020');
         return;
     }
@@ -1847,175 +2295,74 @@ function drawRemotePlayer() {
 
 function drawBullets() {
     for (const b of [...bullets, ...remoteBullets]) {
-        if (b.weaponId === 2) {
-            // ray gun — glowing green orb
-            ctx.save();
-            ctx.shadowColor = '#40ff60';
-            ctx.shadowBlur  = 8;
-            ctx.fillStyle   = '#80ffaa';
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-        } else {
-            ctx.fillStyle = '#f5e642';
-            ctx.beginPath();
-            ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        b.draw();
     }
 }
 
 function drawParticles() {
-    for (const p of particles) {
-        const alpha = p.life / p.maxLife;
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
+    for (const p of particles) p.draw();
 }
-
-// ─── hotbar ───────────────────────────────────────────────────────────────────
 
 // ─── weapon pickup (world-space) ─────────────────────────────────────────────
 
 function drawWeaponPickup() {
-    const sp = SHOTGUN_PICKUP;
-    const owned = inventory.includes(1);
-
-    // highlight patch on wall — always present
-    ctx.fillStyle = '#3a3020';
-    ctx.fillRect(sp.x, sp.y, sp.w, sp.h);
-    ctx.strokeStyle = '#a08030';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(sp.x, sp.y, sp.w, sp.h);
-
-    // shotgun silhouette — always visible, dimmed if already owned
-    const cx = sp.x + sp.w / 2;
-    const cy = sp.y + sp.h / 2;
-    ctx.save();
-    ctx.globalAlpha = owned ? 0.35 : 1.0;
-    ctx.translate(cx, cy);
-    ctx.fillStyle = '#c8a84b';
-    ctx.fillRect(-14, -2, 8, 5);   // stock
-    ctx.fillRect(-6, -3, 7, 6);    // receiver
-    ctx.fillRect(1, -4, 13, 3);    // barrel 1
-    ctx.fillRect(1, 0, 13, 3);     // barrel 2
-    ctx.restore();
-
-    // buy progress bar (only when actively buying)
-    if (!owned && shotgunBuyProgress > 0) {
-        ctx.fillStyle = '#333';
-        ctx.fillRect(sp.x, sp.y + sp.h - 3, sp.w, 3);
+    // ── shotgun (top wall) ──
+    {
+        const sp = SHOTGUN_PICKUP;
+        const owned = inventory.includes(1);
+        ctx.fillStyle = '#3a3020';
+        ctx.fillRect(sp.x, sp.y, sp.w, sp.h);
+        ctx.strokeStyle = '#a08030';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sp.x, sp.y, sp.w, sp.h);
+        const cx = sp.x + sp.w / 2, cy = sp.y + sp.h / 2;
+        ctx.save();
+        ctx.globalAlpha = owned ? 0.35 : 1.0;
+        ctx.translate(cx, cy);
         ctx.fillStyle = '#c8a84b';
-        ctx.fillRect(sp.x, sp.y + sp.h - 3, sp.w * shotgunBuyProgress, 3);
+        ctx.fillRect(-14, -2, 8, 5);
+        ctx.fillRect(-6, -3, 7, 6);
+        ctx.fillRect(1, -4, 13, 3);
+        ctx.fillRect(1,  0, 13, 3);
+        ctx.restore();
+        if (!owned && shotgunBuyProgress > 0) {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(sp.x, sp.y + sp.h - 3, sp.w, 3);
+            ctx.fillStyle = '#c8a84b';
+            ctx.fillRect(sp.x, sp.y + sp.h - 3, sp.w * shotgunBuyProgress, 3);
+        }
     }
-}
 
-// ─── hotbar icons ─────────────────────────────────────────────────────────────
-
-// draws a tiny pistol icon centred on cx, cy
-function drawPistolIcon(cx, cy) {
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    // barrel
-    ctx.fillStyle = '#111';
-    ctx.fillRect(-2, -3, 14, 4);
-
-    // handle
-    ctx.fillStyle = '#0a0a0a';
-    ctx.fillRect(-7, -2, 7, 9);
-
-    // trigger guard
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(-2, 5, 3.5, 0, Math.PI);
-    ctx.stroke();
-
-    ctx.restore();
-}
-
-function drawShotgunIcon(cx, cy) {
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    // stock
-    ctx.fillStyle = '#8b6914';
-    ctx.fillRect(-16, -1, 9, 6);
-
-    // receiver
-    ctx.fillStyle = '#888';
-    ctx.fillRect(-7, -3, 8, 8);
-
-    // twin barrels
-    ctx.fillStyle = '#aaa';
-    ctx.fillRect(1, -4, 16, 3);
-    ctx.fillRect(1, 1, 16, 3);
-
-    ctx.restore();
-}
-
-function drawRaygunIcon(cx, cy) {
-    ctx.save();
-    ctx.translate(cx, cy);
-    // handle/grip
-    ctx.fillStyle = '#3a2a6a';
-    ctx.fillRect(-12, -1, 7, 7);
-    // body
-    ctx.fillStyle = '#5a3aaa';
-    ctx.fillRect(-5, -4, 10, 9);
-    // barrel
-    ctx.fillStyle = '#8860dd';
-    ctx.fillRect(5, -2, 12, 5);
-    // emitter glow
-    ctx.shadowColor = '#40ff60';
-    ctx.shadowBlur = 6;
-    ctx.fillStyle = '#80ffaa';
-    ctx.beginPath();
-    ctx.arc(18, 0, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-}
-
-function drawMachinegunIcon(cx, cy) {
-    ctx.save();
-    ctx.translate(cx, cy);
-    // wooden stock
-    ctx.fillStyle = '#8B5E1A';
-    ctx.fillRect(-20, 0, 8, 4);
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(-20, 0, 1.5, 4);  // butt plate
-    // receiver
-    ctx.fillStyle = '#252525';
-    ctx.fillRect(-12, -3, 12, 8);
-    // banana magazine (trapezoid)
-    ctx.fillStyle = '#1a1a1a';
-    ctx.beginPath();
-    ctx.moveTo(-11, 5);
-    ctx.lineTo(-4,  5);
-    ctx.lineTo(-2.5, 13);
-    ctx.lineTo(-9,  13);
-    ctx.closePath();
-    ctx.fill();
-    // wooden handguard
-    ctx.fillStyle = '#8B5E1A';
-    ctx.fillRect(0, -2, 10, 6);
-    // gas tube
-    ctx.fillStyle = '#444';
-    ctx.fillRect(0, -5, 22, 2);
-    // barrel
-    ctx.fillStyle = '#3a3a3a';
-    ctx.fillRect(10, -1, 12, 3);
-    // muzzle
-    ctx.fillStyle = '#555';
-    ctx.fillRect(22, -2, 3, 5);
-    ctx.restore();
+    // ── uzi (left wall) ──
+    {
+        const up = UZI_PICKUP;
+        const owned = inventory.includes(4);
+        ctx.fillStyle = '#20303a';
+        ctx.fillRect(up.x, up.y, up.w, up.h);
+        ctx.strokeStyle = '#4090c0';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(up.x, up.y, up.w, up.h);
+        // icon rotated 90° to fit on the vertical wall
+        const cx = up.x + up.w / 2, cy = up.y + up.h / 2;
+        ctx.save();
+        ctx.globalAlpha = owned ? 0.35 : 1.0;
+        ctx.translate(cx, cy);
+        ctx.rotate(Math.PI / 2); // rotate to align with wall orientation
+        ctx.fillStyle = '#aac8e0';
+        ctx.fillRect(-13, -3, 13, 7); // receiver
+        ctx.fillRect(0, -2, 7, 5);    // barrel
+        ctx.fillRect(-13, -5, 20, 2); // top rail
+        ctx.fillStyle = '#778899';
+        ctx.fillRect(-9, 4, 5, 7);    // grip
+        ctx.fillRect(-8, 3, 4, 5);    // box mag
+        ctx.restore();
+        if (!owned && uziBuyProgress > 0) {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(up.x + up.w - 3, up.y, 3, up.h);
+            ctx.fillStyle = '#4090c0';
+            ctx.fillRect(up.x + up.w - 3, up.y, 3, up.h * uziBuyProgress);
+        }
+    }
 }
 
 function drawHudPrompt(text) {
@@ -2061,18 +2408,30 @@ function drawBarricadePrompt() {
         }
     }
 
-    // shotgun buy prompt takes priority if near pickup
-    const sp   = SHOTGUN_PICKUP;
-    const scx  = sp.x + sp.w / 2;
-    const scy  = sp.y + sp.h / 2;
-    const sdist = Math.hypot(player.x - scx, player.y - scy);
-    if (sdist < BARRICADE_RANGE && !inventory.includes(1)) {
-        const canAfford = money >= WEAPON_DEFS[1].cost;
-        const label = canAfford
-            ? `[F] Buy Shotgun  £${WEAPON_DEFS[1].cost}`
-            : `Shotgun  £${WEAPON_DEFS[1].cost}  (need £${WEAPON_DEFS[1].cost - money} more)`;
-        drawHudPrompt(label);
-        return;
+    // shotgun buy prompt
+    {
+        const sp  = SHOTGUN_PICKUP;
+        const scx = sp.x + sp.w / 2, scy = sp.y + sp.h / 2;
+        if (Math.hypot(player.x - scx, player.y - scy) < BARRICADE_RANGE && !inventory.includes(1)) {
+            const canAfford = money >= WEAPON_DEFS[1].cost;
+            drawHudPrompt(canAfford
+                ? `[F] Buy Shotgun  £${WEAPON_DEFS[1].cost}`
+                : `Shotgun  £${WEAPON_DEFS[1].cost}  (need £${WEAPON_DEFS[1].cost - money} more)`);
+            return;
+        }
+    }
+
+    // uzi buy prompt
+    {
+        const up  = UZI_PICKUP;
+        const ucx = up.x + up.w / 2, ucy = up.y + up.h / 2;
+        if (Math.hypot(player.x - ucx, player.y - ucy) < BARRICADE_RANGE && !inventory.includes(4)) {
+            const canAfford = money >= WEAPON_DEFS[4].cost;
+            drawHudPrompt(canAfford
+                ? `[F] Buy Uzi  £${WEAPON_DEFS[4].cost}`
+                : `Uzi  £${WEAPON_DEFS[4].cost}  (need £${WEAPON_DEFS[4].cost - money} more)`);
+            return;
+        }
     }
 
     for (const win of windows) {
@@ -2112,12 +2471,9 @@ function drawHotbar() {
         ctx.font      = '11px monospace';
         ctx.fillText(i + 1, x + 5, y + 14);
 
-        // weapon icon based on inventory slot
+        // weapon icon — delegated to each weapon's drawIcon method
         const wid = inventory[i];
-        if (wid === 0) drawPistolIcon(     x + slotSize / 2, y + slotSize / 2 + 2);
-        if (wid === 1) drawShotgunIcon(    x + slotSize / 2, y + slotSize / 2 + 2);
-        if (wid === 2) drawRaygunIcon(     x + slotSize / 2, y + slotSize / 2 + 2);
-        if (wid === 3) drawMachinegunIcon( x + slotSize / 2, y + slotSize / 2 + 2);
+        WEAPON_DEFS[wid]?.drawIcon(x + slotSize / 2, y + slotSize / 2 + 2);
     }
 }
 
@@ -2322,8 +2678,9 @@ function gameLoop(timestamp) {
 
     drawFloor();
     drawWorldBorder();
-    drawExtraRoom();
     drawBuilding();
+    drawExtraRoom();
+    drawFurniture();
     drawGroundMarks();
     drawMysteryBox();
     drawWeaponPickup();
