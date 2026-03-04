@@ -193,6 +193,97 @@ const WEAPON_DEFS = [
             ctx.restore();
         },
     }),
+    new WeaponDef({
+        id: 5, name: 'railgun', magSize: 4, reloadTime: 2.8, cooldown: 1.0,
+        pellets: 1, spread: 0, cost: 0, bulletSpeed: 2000, aoeRadius: 0, reserve: 12,
+        muzzleX: 32, muzzleY: 10,
+        bulletRadius: 3, bulletColor: '#a0d8ff', bulletGlowing: true, bulletGlowColor: '#0060ff',
+        drawModel() {
+            // grip
+            ctx.fillStyle = '#1a1a2e'; ctx.fillRect(-5, 7, 6, 7);
+            ctx.fillStyle = '#111';    ctx.fillRect(-5, 8, 2, 7);    // grip detail
+            // receiver body
+            ctx.fillStyle = '#162040'; ctx.fillRect(1, 6, 10, 8);
+            // energy core glow
+            ctx.save();
+            ctx.shadowColor = '#0080ff'; ctx.shadowBlur = 10;
+            ctx.fillStyle = '#60b0ff';
+            ctx.beginPath(); ctx.arc(7, 10, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+            // top and bottom rails
+            ctx.fillStyle = '#304070';
+            ctx.fillRect(11, 5, 19, 3);   // top rail
+            ctx.fillRect(11, 12, 19, 3);  // bottom rail
+            // barrel between rails
+            ctx.fillStyle = '#1a2a50'; ctx.fillRect(11, 8, 19, 4);
+            // muzzle tip glow
+            ctx.save();
+            ctx.shadowColor = '#0060ff'; ctx.shadowBlur = 8;
+            ctx.fillStyle = '#c0e8ff';
+            ctx.fillRect(30, 8, 2, 4);
+            ctx.restore();
+            // charge sparks between the rails
+            const charge = (inventory[currentWeapon] === 5)
+                ? Math.max(0, 1 - weaponCooldown / 1.0)
+                : 1;
+            if (charge > 0.02 && magAmmo > 0) {
+                const t = performance.now() * 0.001;
+                ctx.save();
+                ctx.shadowColor = '#60b8ff';
+                ctx.shadowBlur  = 4;
+                ctx.lineWidth   = 0.8;
+                for (let i = 0; i < 4; i++) {
+                    const frac = (i + 0.5) / 4;
+                    if (frac > charge) continue; // only show arcs that have charged up
+                    const xc      = 13 + frac * 14;
+                    const flicker = 0.4 + 0.6 * Math.abs(Math.sin(t * 14 + i * 2.4));
+                    ctx.globalAlpha = charge * flicker;
+                    ctx.strokeStyle = i % 2 === 0 ? '#80c8ff' : '#c0e8ff';
+                    const off = Math.sin(t * 10 + i * 1.9) * 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(xc,       8);  // top rail inner edge
+                    ctx.lineTo(xc + off, 10); // midpoint with zigzag
+                    ctx.lineTo(xc - off, 12); // bottom rail inner edge
+                    ctx.stroke();
+                }
+                // muzzle tip pulses when fully charged
+                if (charge >= 1) {
+                    const pulse = 0.6 + 0.4 * Math.sin(t * 8);
+                    ctx.globalAlpha = pulse;
+                    ctx.shadowBlur  = 10;
+                    ctx.fillStyle   = '#ffffff';
+                    ctx.beginPath(); ctx.arc(31, 10, 1.5, 0, Math.PI * 2); ctx.fill();
+                }
+                ctx.restore();
+            }
+        },
+        drawIcon(cx, cy) {
+            ctx.save(); ctx.translate(cx, cy);
+            // grip
+            ctx.fillStyle = '#1a1a2e'; ctx.fillRect(-16, 0, 5, 6);
+            // receiver
+            ctx.fillStyle = '#162040'; ctx.fillRect(-11, -2, 10, 8);
+            // energy core
+            ctx.save();
+            ctx.shadowColor = '#0080ff'; ctx.shadowBlur = 6;
+            ctx.fillStyle = '#60b0ff';
+            ctx.beginPath(); ctx.arc(-5, 2, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+            // rails
+            ctx.fillStyle = '#304070';
+            ctx.fillRect(-1, -4, 19, 2);  // top rail
+            ctx.fillRect(-1,  4, 19, 2);  // bottom rail
+            // barrel
+            ctx.fillStyle = '#1a2a50'; ctx.fillRect(-1, -2, 19, 4);
+            // muzzle glow
+            ctx.save();
+            ctx.shadowColor = '#0060ff'; ctx.shadowBlur = 5;
+            ctx.fillStyle = '#c0e8ff';
+            ctx.beginPath(); ctx.arc(18, 0, 1.5, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+            ctx.restore();
+        },
+    }),
 ];
 const RAYGUN_AOE_DAMAGE = 4;
 
@@ -211,12 +302,17 @@ class Bullet {
         this.color      = wDef.bulletColor;
         this.glowing    = wDef.bulletGlowing;
         this.glowColor  = wDef.bulletGlowColor;
+        this.startX     = x;
+        this.startY     = y;
+        this.age        = 0;
+        this.pierceLeft = weaponId === 5 ? 3 : 0; // railgun pierces up to 3 zombies
     }
 
     update(dt) {
         this.x    += this.vx * dt;
         this.y    += this.vy * dt;
         this.life -= dt;
+        this.age  += dt;
     }
 
     get alive() {
@@ -226,6 +322,76 @@ class Bullet {
     }
 
     draw() {
+        if (this.weaponId === 5) {
+            // ── railgun spiral beam ──
+            const fadeAlpha = Math.max(0, 1 - this.age / 0.22);
+            if (fadeAlpha > 0) {
+                const dx = this.x - this.startX;
+                const dy = this.y - this.startY;
+                const len = Math.hypot(dx, dy);
+                if (len > 1) {
+                    const nx = dx / len, ny = dy / len; // beam direction
+                    const px = -ny,      py = nx;       // perpendicular
+                    ctx.save();
+                    ctx.globalAlpha = fadeAlpha;
+
+                    // outer glow beam
+                    ctx.shadowColor = '#0040ff';
+                    ctx.shadowBlur  = 16;
+                    ctx.strokeStyle = '#4090ff';
+                    ctx.lineWidth   = 5;
+                    ctx.beginPath();
+                    ctx.moveTo(this.startX, this.startY);
+                    ctx.lineTo(this.x, this.y);
+                    ctx.stroke();
+
+                    // inner bright core
+                    ctx.shadowBlur  = 6;
+                    ctx.strokeStyle = '#e0f4ff';
+                    ctx.lineWidth   = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(this.startX, this.startY);
+                    ctx.lineTo(this.x, this.y);
+                    ctx.stroke();
+
+                    // double helix — two sine waves 180° out of phase
+                    const freq  = 0.07; // cycles per pixel
+                    const amp   = 7;    // perpendicular amplitude
+                    const steps = Math.min(Math.ceil(len / 5), 90);
+                    for (let side = 0; side < 2; side++) {
+                        ctx.strokeStyle = side === 0 ? '#60b8ff' : '#b0d8ff';
+                        ctx.lineWidth   = 1.2;
+                        ctx.shadowBlur  = 6;
+                        ctx.beginPath();
+                        for (let k = 0; k <= steps; k++) {
+                            const t   = k / steps;
+                            const d   = t * len;
+                            const off = Math.sin(d * freq * Math.PI * 2 + side * Math.PI) * amp;
+                            const wx  = this.startX + nx * d + px * off;
+                            const wy  = this.startY + ny * d + py * off;
+                            if (k === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
+                        }
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+                }
+            }
+            // slug — elongated streak in the direction of travel
+            const spd = Math.hypot(this.vx, this.vy) || 1;
+            const nx  = this.vx / spd, ny = this.vy / spd;
+            ctx.save();
+            ctx.shadowColor = '#ffffff';
+            ctx.shadowBlur  = 6;
+            ctx.strokeStyle = '#e0f4ff';
+            ctx.lineWidth   = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(this.x - nx * 6, this.y - ny * 6);
+            ctx.lineTo(this.x + nx * 3, this.y + ny * 3);
+            ctx.stroke();
+            ctx.restore();
+            return;
+        }
+
         if (this.glowing) {
             ctx.save();
             ctx.shadowColor = this.glowColor;
@@ -283,8 +449,8 @@ class Particle {
 }
 
 let currentWeapon  = 0;                                    // active slot index
-let inventory      = [0, -1, -1];                         // WEAPON_DEFS id per slot; -1 = empty
-let savedAmmo      = [WEAPON_DEFS[0].magSize, 0, 0];      // mag ammo saved per slot
+let inventory      = [0, -1, -1];                          // WEAPON_DEFS id per slot; -1 = empty
+let savedAmmo      = [WEAPON_DEFS[0].magSize, 0, 0];
 let reserveAmmo    = [Infinity, 0, 0];                    // reserve (spare) ammo per slot
 let weaponCooldown     = 0;
 let mouseHeld          = false;
@@ -942,9 +1108,7 @@ function setupConnection() {
             const prevWave = wave;
             wave      = data.wave;
             waveDelay = data.waveDelay;
-            // reset mystery box for joiner when a new wave starts (mirrors host-side reset)
             if (data.wave > prevWave) {
-                mysteryBoxOpened = false;
                 if (playerDead) { playerDead = false; playerHp = PLAYER_MAX_HP; }
             }
             if (data.windowPlanks) data.windowPlanks.forEach((p, i) => { windows[i].planks = p; });
@@ -1284,7 +1448,6 @@ const MYSTERY_BOX = (() => {
 })();
 
 let mysteryBoxProgress = 0;  // 0..1 hold-F progress
-let mysteryBoxOpened   = false; // resets each wave
 let mysteryBoxAnim     = 0;  // 0..1 pulsing glow timer
 let mysteryBoxResult   = null; // { text, timer } — shown briefly after opening
 
@@ -1346,7 +1509,6 @@ function updateMysteryBox(dt) {
         if (mysteryBoxResult.timer <= 0) mysteryBoxResult = null;
     }
 
-    if (mysteryBoxOpened) return;
     const mb   = MYSTERY_BOX;
     const cx   = mb.x + mb.w / 2;
     const cy   = mb.y + mb.h / 2;
@@ -1359,13 +1521,13 @@ function updateMysteryBox(dt) {
             mysteryBoxProgress = 0;
             if (money < mb.cost) return;
             money -= mb.cost;
-            mysteryBoxOpened = true;
             const roll = Math.random();
-            // 10% ray gun | 20% shotgun | 30% machine gun | 20% uzi | 20% teddy bear
-            const prize = roll < 0.10 ? 2
-                        : roll < 0.30 ? 1
-                        : roll < 0.60 ? 3
-                        : roll < 0.80 ? 4
+            // 5% ray gun | 5% railgun | 15% shotgun | 30% machine gun | 15% uzi | 30% teddy bear
+            const prize = roll < 0.05 ? 2
+                        : roll < 0.10 ? 5
+                        : roll < 0.25 ? 1
+                        : roll < 0.55 ? 3
+                        : roll < 0.70 ? 4
                         : -1; // teddy bear
             if (prize !== -1) {
                 let targetSlot = inventory.indexOf(-1);
@@ -1542,7 +1704,7 @@ function drawMysteryBox() {
 
     ctx.save();
 
-    if (!mysteryBoxOpened) {
+    {
         // pulsing green glow
         const glowR = mb.w * 0.9 + glow * 8;
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
@@ -1553,22 +1715,22 @@ function drawMysteryBox() {
     }
 
     // box body
-    ctx.fillStyle = mysteryBoxOpened ? '#1a1a1a' : '#1a2e1a';
+    ctx.fillStyle = '#1a2e1a';
     ctx.fillRect(mb.x, mb.y, mb.w, mb.h);
-    ctx.strokeStyle = mysteryBoxOpened ? '#333' : `rgba(60,220,80,${0.5 + 0.5 * glow})`;
+    ctx.strokeStyle = `rgba(60,220,80,${0.5 + 0.5 * glow})`;
     ctx.lineWidth = 1.5;
     ctx.strokeRect(mb.x, mb.y, mb.w, mb.h);
 
-    // ? or empty label
-    ctx.font = `bold ${mysteryBoxOpened ? 10 : 18}px monospace`;
+    // ? label
+    ctx.font = 'bold 18px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = mysteryBoxOpened ? '#333' : `rgba(80,255,100,${0.7 + 0.3 * glow})`;
-    ctx.fillText(mysteryBoxOpened ? 'EMPTY' : '?', cx, cy);
+    ctx.fillStyle = `rgba(80,255,100,${0.7 + 0.3 * glow})`;
+    ctx.fillText('?', cx, cy);
     ctx.textBaseline = 'alphabetic';
 
     // buy progress bar
-    if (!mysteryBoxOpened && mysteryBoxProgress > 0) {
+    if (mysteryBoxProgress > 0) {
         ctx.fillStyle = '#222';
         ctx.fillRect(mb.x, mb.y + mb.h + 2, mb.w, 3);
         ctx.fillStyle = '#40e060';
@@ -1851,6 +2013,7 @@ function updateBullets(dt) {
         }
         // bullet-zombie collision
         let zombieHit = false;
+        let bulletDead = false;
         if (shouldSimulateZombies()) {
             for (let j = zombies.length - 1; j >= 0; j--) {
                 const z = zombies[j];
@@ -1858,24 +2021,25 @@ function updateBullets(dt) {
                 if (dx * dx + dy * dy < ZOMBIE_RADIUS * ZOMBIE_RADIUS) {
                     if (b.weaponId === 2) {
                         spawnRaygunExplosion(b.x, b.y);
-                    } else {
-                        z.hp -= b.weaponId === 3 ? 2 : 1;
-                        if (z.hp <= 0) {
-                            const zx = z.x, zy = z.y;
-                            zombies.splice(j, 1);
-                            money += ZOMBIE_KILL_REWARD;
-                            spawnBloodSmear(zx, zy);
-                            trySpawnAmmoDrop(zx, zy);
-                            if (conn && conn.open) conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
-                        } else {
-                            // survived — brief knockback in bullet direction
-                            const ba = Math.atan2(b.vy, b.vx);
-                            z.kbVx += Math.cos(ba) * 260;
-                            z.kbVy += Math.sin(ba) * 260;
-                        }
+                        bulletDead = true; break;
                     }
+                    z.hp -= b.weaponId === 5 ? 20 : b.weaponId === 3 ? 2 : 1;
+                    if (z.hp <= 0) {
+                        const zx = z.x, zy = z.y;
+                        zombies.splice(j, 1);
+                        money += ZOMBIE_KILL_REWARD;
+                        spawnBloodSmear(zx, zy);
+                        trySpawnAmmoDrop(zx, zy);
+                        if (conn && conn.open) conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
+                    } else {
+                        const ba = Math.atan2(b.vy, b.vx);
+                        z.kbVx += Math.cos(ba) * 260;
+                        z.kbVy += Math.sin(ba) * 260;
+                    }
+                    spawnParticles(b.x, b.y, '#cc2020', 8, Math.atan2(b.vy, b.vx) + Math.PI);
                     zombieHit = true;
-                    break;
+                    if (b.pierceLeft > 0) { b.pierceLeft--; }
+                    else { bulletDead = true; break; }
                 }
             }
         } else {
@@ -1883,18 +2047,17 @@ function updateBullets(dt) {
                 const z = remoteZombies[j];
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < ZOMBIE_RADIUS * ZOMBIE_RADIUS) {
-                    if (b.weaponId === 2) spawnRaygunExplosion(b.x, b.y);
-                    else if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: b.weaponId === 3 ? 2 : 1, angle: Math.atan2(b.vy, b.vx) });
+                    if (b.weaponId === 2) { spawnRaygunExplosion(b.x, b.y); bulletDead = true; break; }
+                    if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: b.weaponId === 5 ? 20 : b.weaponId === 3 ? 2 : 1, angle: Math.atan2(b.vy, b.vx) });
+                    spawnParticles(b.x, b.y, '#cc2020', 8, Math.atan2(b.vy, b.vx) + Math.PI);
                     zombieHit = true;
-                    break;
+                    if (b.pierceLeft > 0) { b.pierceLeft--; }
+                    else { bulletDead = true; break; }
                 }
             }
         }
-        if (zombieHit) {
-            if (b.weaponId !== 2) spawnParticles(b.x, b.y, '#cc2020', 8, Math.atan2(b.vy, b.vx) + Math.PI);
-            bullets.splice(i, 1);
-            continue;
-        }
+        if (bulletDead) { bullets.splice(i, 1); continue; }
+        if (zombieHit) continue;
         // bullet hits remote player
         if (remotePeer) {
             const dx = b.x - remotePeer.x, dy = b.y - remotePeer.y;
@@ -1999,7 +2162,6 @@ function updateZombies(dt) {
             spawnTimer  = 0;
             // revive dead players at the start of each new wave
             if (playerDead) { playerDead = false; playerHp = PLAYER_MAX_HP; }
-            mysteryBoxOpened = false;
         }
     }
 
@@ -2461,9 +2623,10 @@ function drawRemotePlayer() {
 function drawMuzzleFlash(flash) {
     if (!flash || flash.timer <= 0) return;
     const t = flash.timer / 0.08; // 1 → 0 as it fades
-    const color     = flash.weaponId === 2 ? '#80ffaa' : '#fff7a0';
-    const glowColor = flash.weaponId === 2 ? '#40ff60' : '#ffcc00';
-    const size = (flash.weaponId === 1 ? 14 : flash.weaponId === 2 ? 10 : 8) * t; // shotgun biggest
+    const isRailgun = flash.weaponId === 5;
+    const color     = isRailgun ? '#a0d8ff' : flash.weaponId === 2 ? '#80ffaa' : '#fff7a0';
+    const glowColor = isRailgun ? '#0050ff' : flash.weaponId === 2 ? '#40ff60' : '#ffcc00';
+    const size = (flash.weaponId === 1 ? 14 : flash.weaponId === 2 ? 10 : isRailgun ? 13 : 8) * t;
 
     ctx.save();
     ctx.globalAlpha = t;
@@ -2486,18 +2649,41 @@ function drawMuzzleFlash(flash) {
     ctx.arc(0, 0, size * 0.45, 0, Math.PI * 2);
     ctx.fill();
 
-    // spikes — forward-biased starburst
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    const spikes = flash.weaponId === 1 ? 8 : 6;
-    for (let i = 0; i < spikes; i++) {
-        const a   = (i / spikes) * Math.PI * 2;
-        // forward spike is longer
-        const len = (Math.abs(Math.cos(a)) > 0.6 ? 1.8 : 1.0) * size;
+    if (isRailgun) {
+        // elongated forward discharge beam
+        ctx.shadowColor = '#0050ff';
+        ctx.shadowBlur  = 10;
+        ctx.strokeStyle = '#80c8ff';
+        ctx.lineWidth   = 2.5;
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+        ctx.lineTo(size * 5, 0);
         ctx.stroke();
+        // perpendicular electric arcs
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#c0e8ff';
+        for (let i = 1; i <= 3; i++) {
+            const xpos = size * i * 1.2;
+            const yoff = size * 0.6 * (i % 2 === 0 ? 1 : -1);
+            ctx.beginPath();
+            ctx.moveTo(xpos, -size * 0.6);
+            ctx.lineTo(xpos + size * 0.3, yoff);
+            ctx.lineTo(xpos + size * 0.6, -yoff * 0.5);
+            ctx.stroke();
+        }
+    } else {
+        // spikes — forward-biased starburst
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        const spikes = flash.weaponId === 1 ? 8 : 6;
+        for (let i = 0; i < spikes; i++) {
+            const a   = (i / spikes) * Math.PI * 2;
+            const len = (Math.abs(Math.cos(a)) > 0.6 ? 1.8 : 1.0) * size;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+            ctx.stroke();
+        }
     }
 
     ctx.restore();
@@ -2619,7 +2805,7 @@ function drawBarricadePrompt() {
     }
 
     // mystery box prompt
-    if (!mysteryBoxOpened) {
+    {
         const mb  = MYSTERY_BOX;
         const mcx = mb.x + mb.w / 2, mcy = mb.y + mb.h / 2;
         if (Math.hypot(player.x - mcx, player.y - mcy) < BARRICADE_RANGE) {

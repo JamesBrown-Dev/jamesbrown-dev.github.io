@@ -39,6 +39,15 @@ canvas {
     letter-spacing: 12px;
     color: #cc2020;
     text-shadow: 0 0 40px rgba(200, 30, 30, 0.4);
+    margin-bottom: 0;
+}
+
+#lobby-version {
+    font-family: monospace;
+    font-size: 12px;
+    color: #664444;
+    letter-spacing: 2px;
+    margin-top: -20px;
 }
 
 #lobby-buttons {
