@@ -1251,15 +1251,13 @@ const BARRICADE_REPAIR_TIME = 1.2; // seconds to hold F to add one plank
 const BARRICADE_RANGE       = 60;  // px from window centre
 
 // ─── shotgun wall pickup ──────────────────────────────────────────────────────
-// positioned on the top wall, midway between the top window's right edge and the top-right corner
+// on the extra room top wall, right segment (between corridor right wall and extra room right)
 const SHOTGUN_PICKUP = (() => {
-    const b  = BUILDING;
-    const t  = b.wallThickness;
-    const cx = b.x + b.w / 2;                        // building horizontal centre
-    const winRightEdge = cx + WINDOW_GAP / 2;         // top window right edge
-    const cornerX      = b.x + b.w;                  // top-right corner
-    const midX         = (winRightEdge + cornerX) / 2;
-    return { x: midX - 18, y: b.y, w: 36, h: t };    // 36px wide, full wall thickness
+    const t = BUILDING.wallThickness;
+    const { doorCX, endRoomTopY, endRoomR } = EXTRA_ROOM;
+    const cR   = doorCX + DOOR_GAP / 2;
+    const midX = (cR + t + endRoomR - t) / 2;        // midpoint of right top-wall segment
+    return { x: midX - 18, y: endRoomTopY, w: 36, h: t };
 })();
 
 let shotgunBuyProgress = 0; // 0..1 while holding F near pickup
@@ -1277,9 +1275,12 @@ let uziBuyProgress = 0; // 0..1 while holding F near pickup
 
 // ─── mystery box ──────────────────────────────────────────────────────────────
 const MYSTERY_BOX = (() => {
-    const r = EXTRA_ROOM, t = r.wallThickness;
-    // top-right corner of the bottom room interior
-    return { x: r.endRoomR - t - 48, y: r.endRoomTopY + t + 12, w: 32, h: 32, cost: 200 };
+    const b = BUILDING, t = b.wallThickness;
+    const { endRoomL } = EXTRA_ROOM;
+    const { corridorLX } = SIDE_ROOM;
+    // top-centre of the side room interior (just below the main building bottom wall)
+    const cx = (endRoomL + t + corridorLX) / 2;
+    return { x: cx - 16, y: b.y + b.h + 10, w: 32, h: 32, cost: 200 };
 })();
 
 let mysteryBoxProgress = 0;  // 0..1 hold-F progress
@@ -2515,7 +2516,7 @@ function drawParticles() {
 // ─── weapon pickup (world-space) ─────────────────────────────────────────────
 
 function drawWeaponPickup() {
-    // ── shotgun (top wall) ──
+    // ── shotgun (extra room top wall, right segment) ──
     {
         const sp = SHOTGUN_PICKUP;
         const owned = inventory.includes(1);
