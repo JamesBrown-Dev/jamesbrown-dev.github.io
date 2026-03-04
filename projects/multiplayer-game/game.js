@@ -53,6 +53,9 @@ class WeaponDef {
         this.maxBloom          = opts.maxBloom          ?? 0;   // cap on accumulated bloom
         this.bloomDecay        = opts.bloomDecay        ?? 0;   // spread lost per second on release
         this.firstShotCooldown = opts.firstShotCooldown ?? 0;   // seconds before bloom can reset again
+        // muzzle position in player-local space (where flash/bullet spawns)
+        this.muzzleX = opts.muzzleX ?? 18;
+        this.muzzleY = opts.muzzleY ?? 9.5;
         // bullet visuals — read by Bullet constructor
         this.bulletRadius    = opts.bulletRadius    ?? 2;
         this.bulletColor     = opts.bulletColor     ?? '#f5e642';
@@ -89,6 +92,7 @@ const WEAPON_DEFS = [
     new WeaponDef({
         id: 1, name: 'shotgun', magSize: 2, reloadTime: 2.2, cooldown: 0.9,
         pellets: 12, spread: 0.28, cost: 200, bulletSpeed: 700, aoeRadius: 0, reserve: 16,
+        muzzleX: 22, muzzleY: 10,
         bulletRadius: 2, bulletColor: '#f5e642',
         drawModel() {
             ctx.fillStyle = '#6b4a0f'; ctx.fillRect(-1, 7, 5, 7);    // stock
@@ -110,6 +114,7 @@ const WEAPON_DEFS = [
     new WeaponDef({
         id: 2, name: 'raygun', magSize: 12, reloadTime: 1.8, cooldown: 0.5,
         pellets: 1, spread: 0, cost: 0, bulletSpeed: 900, aoeRadius: 80, reserve: 36,
+        muzzleX: 22, muzzleY: 11,
         bulletRadius: 4, bulletColor: '#80ffaa', bulletGlowing: true, bulletGlowColor: '#40ff60',
         drawModel() {
             ctx.fillStyle = '#3a2060'; ctx.fillRect(0, 7, 8, 7);   // grip
@@ -135,6 +140,7 @@ const WEAPON_DEFS = [
         id: 3, name: 'machinegun', magSize: 30, reloadTime: 3.0, cooldown: 0.1,
         pellets: 1, spread: 0.06, cost: 0, bulletSpeed: 680, aoeRadius: 0, reserve: 90,
         autoFire: true, bulletRadius: 2, bulletColor: '#f5e642',
+        muzzleX: 32, muzzleY: 10,
         bloomPerShot: 0.015, maxBloom: 0.18, bloomDecay: 1.5, firstShotCooldown: 0.3,
         drawModel() {
             ctx.fillStyle = '#8B5E1A'; ctx.fillRect(-7, 7, 7, 6);      // stock
@@ -315,6 +321,10 @@ let   nextDropId    = 0;
 // holds the last state received from the other player
 let remotePeer = null;
 
+// muzzle flash state — { x, y, angle, timer, weaponId } or null
+let muzzleFlash       = null;
+let remoteMuzzleFlash = null;
+
 let localPlayerName = 'Player';
 
 let money = 0; // currency — to be used for future upgrades/purchases
@@ -366,6 +376,8 @@ class Zombie {
         this.huntWaypoints = []; // routing waypoints while hunting
         this.id           = nextZombieId++;
         this.angle        = 0;
+        this.kbVx         = 0;  // knockback velocity x
+        this.kbVy         = 0;  // knockback velocity y
     }
 }
 
@@ -438,6 +450,30 @@ class GameWindow {
 
 // Window gap size along the wall face
 const WINDOW_GAP = 55;
+
+// ─── side room (pocket between main building bottom and extra room top-left) ──
+// It occupies the void between endRoomL, the corridor left outer wall, the main
+// building bottom, and the extra room top-left wall segment.
+const SIDE_ROOM = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    const { doorCX, endRoomL, CORRIDOR_H } = EXTRA_ROOM;
+    const corridorLX  = doorCX - DOOR_GAP / 2 - t; // left face of corridor left outer-wall
+    const SIDE_DOOR_W = 80;                           // door gap width in the bottom wall
+    const doorX       = endRoomL + t;                // door left x (right of corner cap)
+    const winY        = b.y + b.h + CORRIDOR_H / 2 - WINDOW_GAP / 2; // window centred vertically
+    return { doorX, SIDE_DOOR_W, winY, corridorLX };
+})();
+
+// Barrier rect that physically seals the side-room doorway until unlocked
+const SIDE_ROOM_BARRIER = (() => {
+    const t = BUILDING.wallThickness;
+    return {
+        x: SIDE_ROOM.doorX,
+        y: EXTRA_ROOM.endRoomTopY,
+        w: SIDE_ROOM.SIDE_DOOR_W,
+        h: t,
+    };
+})();
 
 // One window centred on each wall side
 const windows = (() => {
@@ -529,7 +565,9 @@ const extraRoomWalls = (() => {
         { x: cL - t, y: buildingBottomY, w: t, h: CORRIDOR_H + t },
         { x: cR,     y: buildingBottomY, w: t, h: CORRIDOR_H + t },
         // end room top wall segments (gap aligns with corridor)
-        { x: endRoomL, y: endRoomTopY, w: cL - t - endRoomL,   h: t },
+        // top-left segment: corner cap + gap for side-room door + remainder
+        { x: endRoomL,                                              y: endRoomTopY, w: t,                                                          h: t },
+        { x: SIDE_ROOM.doorX + SIDE_ROOM.SIDE_DOOR_W,             y: endRoomTopY, w: (cL - t) - (SIDE_ROOM.doorX + SIDE_ROOM.SIDE_DOOR_W),       h: t },
         { x: cR + t,   y: endRoomTopY, w: endRoomR - (cR + t), h: t },
         // end room left wall — split around window
         { x: endRoomL, y: endRoomTopY,         w: t, h: winL.y - endRoomTopY },
@@ -549,6 +587,26 @@ walls.push(DOOR_BARRIER);
 
 // Extra room windows joined AFTER buildWalls() so they aren't processed as main-building windows
 windows.push(...extraRoomWindows);
+
+// ─── side room walls and window ──────────────────────────────────────────────
+const sideRoomWindow = (() => {
+    const { endRoomL } = EXTRA_ROOM;
+    return new GameWindow(endRoomL, SIDE_ROOM.winY, BUILDING.wallThickness, WINDOW_GAP, 'left');
+})();
+const sideRoomWalls = (() => {
+    const b = BUILDING, t = b.wallThickness;
+    const { endRoomL, endRoomTopY } = EXTRA_ROOM;
+    const win = sideRoomWindow;
+    const topY = b.y + b.h - t; // flush with main building bottom outer-wall top
+    return [
+        // left exterior wall — split around window
+        { x: endRoomL, y: topY,               w: t, h: win.y - topY                       },
+        { x: endRoomL, y: win.y + WINDOW_GAP, w: t, h: endRoomTopY - (win.y + WINDOW_GAP) },
+    ];
+})();
+walls.push(...sideRoomWalls);
+walls.push(SIDE_ROOM_BARRIER);
+windows.push(sideRoomWindow);
 
 // ─── indoor furniture (block walking, bullets, and zombie vision) ─────────────
 const FURNITURE = (() => {
@@ -589,6 +647,8 @@ walls.push(...FURNITURE.barrels, FURNITURE.bookcase, ...FURNITURE.extraBarrels);
 
 let extraRoomUnlocked = false;
 let doorProgress      = 0; // 0..1 buy-progress
+let sideRoomUnlocked  = false;
+let sideRoomDoorProgress = 0; // 0..1 buy-progress
 
 // ─── collision helpers ────────────────────────────────────────────────────────
 
@@ -732,6 +792,7 @@ const NAV_WAYPOINTS = (() => {
     const R = ZOMBIE_RADIUS + 10; // clearance from walls
     const { doorCX, buildingBottomY, CORRIDOR_H, endRoomTopY,
             endRoomL, endRoomR, END_ROOM_H } = EXTRA_ROOM;
+    const { doorX, SIDE_DOOR_W, corridorLX } = SIDE_ROOM;
     return [
         // ── main room interior corners ──
         { x: b.x + t + R,         y: b.y + t + R         },
@@ -750,6 +811,9 @@ const NAV_WAYPOINTS = (() => {
         { x: endRoomL + t + R,                y: endRoomTopY + END_ROOM_H - R   },
         { x: endRoomR - t - R,                y: endRoomTopY + END_ROOM_H - R   },
         { x: (endRoomL + endRoomR) / 2,       y: endRoomTopY + END_ROOM_H / 2   },
+        // ── side room (pocket left of corridor) ──
+        { x: doorX + SIDE_DOOR_W / 2,                  y: endRoomTopY - R                              }, // door approach from inside
+        { x: (endRoomL + t + corridorLX) / 2,          y: buildingBottomY + CORRIDOR_H / 2             }, // room centre
     ];
 })();
 
@@ -870,6 +934,8 @@ function setupConnection() {
             // spawn the other player's bullet(s) on our end
             const batch = data.bullets || [{ x: data.x, y: data.y, vx: data.vx, vy: data.vy }];
             for (const b of batch) remoteBullets.push(new Bullet(b.x, b.y, b.vx, b.vy, b.weaponId ?? 0));
+            const fb = batch[0];
+            remoteMuzzleFlash = { x: fb.x, y: fb.y, angle: Math.atan2(fb.vy, fb.vx), timer: 0.08, weaponId: fb.weaponId ?? 0 };
         } else if (data.type === 'zombies') {
             // joiner receives zombie positions + wave info from host
             remoteZombies = data.zombies;
@@ -896,6 +962,9 @@ function setupConnection() {
                         conn.send({ type: 'killReward', amount: ZOMBIE_KILL_REWARD });
                         conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
                     }
+                } else if (data.angle !== undefined) {
+                    zombies[idx].kbVx += Math.cos(data.angle) * 260;
+                    zombies[idx].kbVy += Math.sin(data.angle) * 260;
                 }
             }
         } else if (data.type === 'killReward') {
@@ -926,6 +995,12 @@ function setupConnection() {
             if (!extraRoomUnlocked) {
                 extraRoomUnlocked = true;
                 const idx = walls.indexOf(DOOR_BARRIER);
+                if (idx !== -1) walls.splice(idx, 1);
+            }
+        } else if (data.type === 'unlockSideRoom') {
+            if (!sideRoomUnlocked) {
+                sideRoomUnlocked = true;
+                const idx = walls.indexOf(SIDE_ROOM_BARRIER);
                 if (idx !== -1) walls.splice(idx, 1);
             }
         }
@@ -985,8 +1060,8 @@ function tryFire() {
         return;
     }
 
-    // spawn bullet(s) from the tip of the gun barrel (local space tip is at x=18, y=9.5)
-    const GUN_TIP_X = 18, GUN_TIP_Y = 9.5;
+    // spawn bullet(s) from the tip of the gun barrel
+    const GUN_TIP_X = wDef.muzzleX, GUN_TIP_Y = wDef.muzzleY;
     const bx = player.x + Math.cos(player.angle) * GUN_TIP_X - Math.sin(player.angle) * GUN_TIP_Y;
     const by = player.y + Math.sin(player.angle) * GUN_TIP_X + Math.cos(player.angle) * GUN_TIP_Y;
 
@@ -1000,6 +1075,7 @@ function tryFire() {
     bullets.push(...newBullets);
     magAmmo--;
     weaponCooldown = wDef.cooldown;
+    muzzleFlash = { x: bx, y: by, angle: player.angle, timer: 0.08, weaponId: wDef.id };
 
     // build bloom after each shot
     if (wDef.bloomPerShot) {
@@ -1339,6 +1415,35 @@ function unlockExtraRoom() {
     if (conn && conn.open) conn.send({ type: 'unlockRoom' });
 }
 
+function unlockSideRoom() {
+    sideRoomUnlocked = true;
+    const idx = walls.indexOf(SIDE_ROOM_BARRIER);
+    if (idx !== -1) walls.splice(idx, 1);
+    if (conn && conn.open) conn.send({ type: 'unlockSideRoom' });
+}
+
+function updateSideRoomDoor(dt) {
+    if (sideRoomUnlocked) return;
+    const db   = SIDE_ROOM_BARRIER;
+    const cx   = db.x + db.w / 2;
+    const cy   = db.y + db.h / 2;
+    const dist = Math.hypot(player.x - cx, player.y - cy);
+    const holding = isHoldingF();
+
+    if (dist < BARRICADE_RANGE && holding) {
+        if (money >= DOOR_COST) {
+            sideRoomDoorProgress = Math.min(1, sideRoomDoorProgress + dt / 1.5);
+            if (sideRoomDoorProgress >= 1) {
+                sideRoomDoorProgress = 0;
+                money -= DOOR_COST;
+                unlockSideRoom();
+            }
+        }
+    } else {
+        sideRoomDoorProgress = Math.max(0, sideRoomDoorProgress - dt * 3);
+    }
+}
+
 function drawExtraRoom() {
     const r = EXTRA_ROOM, t = r.wallThickness;
     const { doorCX, buildingBottomY, CORRIDOR_H, END_ROOM_W, END_ROOM_H, endRoomL, endRoomTopY } = r;
@@ -1347,6 +1452,9 @@ function drawExtraRoom() {
     // corridor floor (narrow strip below the door)
     ctx.fillStyle = '#202020';
     ctx.fillRect(cL, buildingBottomY, DOOR_GAP, CORRIDOR_H);
+
+    // side room floor (pocket to the left of the corridor)
+    ctx.fillRect(endRoomL + t, buildingBottomY, SIDE_ROOM.corridorLX - endRoomL - t, CORRIDOR_H);
 
     // end room floor (wider area at the bottom of the corridor)
     ctx.fillRect(endRoomL + t, endRoomTopY + t, END_ROOM_W - t * 2, END_ROOM_H - t);
@@ -1385,6 +1493,42 @@ function drawExtraRoom() {
             ctx.fillRect(db.x, db.y - 9, db.w, 4);
             ctx.fillStyle = '#e8c060';
             ctx.fillRect(db.x, db.y - 9, db.w * doorProgress, 4);
+        }
+    }
+
+    // side room door — wooden panels when locked, open gap when unlocked
+    const sdb = SIDE_ROOM_BARRIER;
+    if (!sideRoomUnlocked) {
+        ctx.fillStyle = '#5a3e14';
+        ctx.fillRect(sdb.x, sdb.y, sdb.w, sdb.h);
+        ctx.strokeStyle = '#8B6020';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(sdb.x, sdb.y, sdb.w, sdb.h);
+
+        // decorative panel lines
+        ctx.strokeStyle = '#4a3010';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const smid = sdb.x + sdb.w / 2;
+        ctx.moveTo(smid, sdb.y + 3);
+        ctx.lineTo(smid, sdb.y + sdb.h - 3);
+        ctx.stroke();
+
+        // price label (inside side room, above the door)
+        ctx.save();
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#e8c060';
+        ctx.fillText(`[F] £${DOOR_COST}`, sdb.x + sdb.w / 2, sdb.y - 3);
+        ctx.restore();
+
+        // progress bar
+        if (sideRoomDoorProgress > 0) {
+            ctx.fillStyle = '#222';
+            ctx.fillRect(sdb.x, sdb.y - 9, sdb.w, 4);
+            ctx.fillStyle = '#e8c060';
+            ctx.fillRect(sdb.x, sdb.y - 9, sdb.w * sideRoomDoorProgress, 4);
         }
     }
 }
@@ -1722,6 +1866,11 @@ function updateBullets(dt) {
                             spawnBloodSmear(zx, zy);
                             trySpawnAmmoDrop(zx, zy);
                             if (conn && conn.open) conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
+                        } else {
+                            // survived — brief knockback in bullet direction
+                            const ba = Math.atan2(b.vy, b.vx);
+                            z.kbVx += Math.cos(ba) * 260;
+                            z.kbVy += Math.sin(ba) * 260;
                         }
                     }
                     zombieHit = true;
@@ -1734,7 +1883,7 @@ function updateBullets(dt) {
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < ZOMBIE_RADIUS * ZOMBIE_RADIUS) {
                     if (b.weaponId === 2) spawnRaygunExplosion(b.x, b.y);
-                    else if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: b.weaponId === 3 ? 2 : 1 });
+                    else if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: b.weaponId === 3 ? 2 : 1, angle: Math.atan2(b.vy, b.vx) });
                     zombieHit = true;
                     break;
                 }
@@ -1799,9 +1948,11 @@ function spawnZombie() {
     // Pick the target window first, then spawn on the edge that faces it.
     // This guarantees the zombie has direct line of sight and never needs
     // to route around the building.
-    const available = extraRoomUnlocked
-        ? windows
-        : windows.filter(w => !extraRoomWindows.includes(w));
+    const available = windows.filter(w => {
+        if (extraRoomWindows.includes(w)) return extraRoomUnlocked;
+        if (w === sideRoomWindow) return sideRoomUnlocked;
+        return true;
+    });
     const win = available[Math.floor(Math.random() * available.length)];
     const ap  = windowApproachPoint(win);
 
@@ -1970,6 +2121,19 @@ function updateZombies(dt) {
                 }
             }
         }
+    }
+
+    // ── knockback: apply velocity and decay rapidly ──
+    const kbDecay = Math.exp(-18 * dt); // ~95% gone in 0.17s
+    for (const z of zombies) {
+        if (z.kbVx === 0 && z.kbVy === 0) continue;
+        z.x    += z.kbVx * dt;
+        z.y    += z.kbVy * dt;
+        z.kbVx *= kbDecay;
+        z.kbVy *= kbDecay;
+        if (Math.abs(z.kbVx) < 0.5) z.kbVx = 0;
+        if (Math.abs(z.kbVy) < 0.5) z.kbVy = 0;
+        for (const wall of walls) resolveCircleRect(z, ZOMBIE_RADIUS, wall);
     }
 
     // ── zombie-zombie separation ──
@@ -2293,6 +2457,51 @@ function drawRemotePlayer() {
     drawPlayerName(remotePeer.x, remotePeer.y, remotePeer.name ?? 'Player', '#e07070');
 }
 
+function drawMuzzleFlash(flash) {
+    if (!flash || flash.timer <= 0) return;
+    const t = flash.timer / 0.08; // 1 → 0 as it fades
+    const color     = flash.weaponId === 2 ? '#80ffaa' : '#fff7a0';
+    const glowColor = flash.weaponId === 2 ? '#40ff60' : '#ffcc00';
+    const size = (flash.weaponId === 1 ? 14 : flash.weaponId === 2 ? 10 : 8) * t; // shotgun biggest
+
+    ctx.save();
+    ctx.globalAlpha = t;
+    ctx.translate(flash.x, flash.y);
+    ctx.rotate(flash.angle);
+
+    // glow
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2.2);
+    grad.addColorStop(0,   glowColor);
+    grad.addColorStop(0.4, glowColor + '99');
+    grad.addColorStop(1,   glowColor + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // bright centre
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+
+    // spikes — forward-biased starburst
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    const spikes = flash.weaponId === 1 ? 8 : 6;
+    for (let i = 0; i < spikes; i++) {
+        const a   = (i / spikes) * Math.PI * 2;
+        // forward spike is longer
+        const len = (Math.abs(Math.cos(a)) > 0.6 ? 1.8 : 1.0) * size;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
 function drawBullets() {
     for (const b of [...bullets, ...remoteBullets]) {
         b.draw();
@@ -2389,6 +2598,20 @@ function drawBarricadePrompt() {
             const label = canAfford
                 ? `[F] Unlock Room  £${DOOR_COST}`
                 : `Unlock Room  £${DOOR_COST}  (need £${DOOR_COST - money} more)`;
+            drawHudPrompt(label);
+            return;
+        }
+    }
+
+    // side room door prompt
+    if (!sideRoomUnlocked) {
+        const sdb = SIDE_ROOM_BARRIER;
+        const scx = sdb.x + sdb.w / 2, scy = sdb.y + sdb.h / 2;
+        if (Math.hypot(player.x - scx, player.y - scy) < BARRICADE_RANGE) {
+            const canAfford = money >= DOOR_COST;
+            const label = canAfford
+                ? `[F] Unlock Side Room  £${DOOR_COST}`
+                : `Unlock Side Room  £${DOOR_COST}  (need £${DOOR_COST - money} more)`;
             drawHudPrompt(label);
             return;
         }
@@ -2658,6 +2881,8 @@ function gameLoop(timestamp) {
 
     updatePlayer(dt);
     updateBullets(dt);
+    if (muzzleFlash)       muzzleFlash.timer       -= dt;
+    if (remoteMuzzleFlash) remoteMuzzleFlash.timer  -= dt;
     updateParticles(dt);
     updatePlankDebris(dt);
     updateGroundMarks(dt);
@@ -2666,6 +2891,7 @@ function gameLoop(timestamp) {
     updateWeaponPickup(dt);
     updateMysteryBox(dt);
     updateExtraRoomDoor(dt);
+    updateSideRoomDoor(dt);
     updateZombies(dt);
     updateJoinerZombieDamage(dt);
     updateCamera();
@@ -2690,7 +2916,9 @@ function gameLoop(timestamp) {
     drawBullets();
     drawParticles();
     drawRemotePlayer();
+    drawMuzzleFlash(remoteMuzzleFlash);
     drawPlayer();
+    drawMuzzleFlash(muzzleFlash);
 
     ctx.restore();
 
