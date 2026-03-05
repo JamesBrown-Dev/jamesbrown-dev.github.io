@@ -1580,7 +1580,7 @@ function updatePlayer(dt) {
     }
 
     // auto-fire while mouse held (machine gun and any other autoFire weapons)
-    if (mouseHeld && curWeaponDef().autoFire) tryFire();
+    if (mouseHeld && (curWeaponDef().autoFire || isMobile)) tryFire();
 
     // send position + current weapon to the other player (~60 Hz)
     if (moveSyncTimer <= 0 && conn && conn.open) {
@@ -2662,11 +2662,13 @@ function updateJoinerZombieDamage(dt) {
 }
 
 // centres the camera on the player, clamped so it never shows outside the world
+const MOBILE_ZOOM = 0.6;
 function updateCamera() {
-    camera.x = player.x - canvas.width  / 2;
-    camera.y = player.y - canvas.height / 2;
-    camera.x = Math.max(0, Math.min(camera.x, WORLD_W - canvas.width));
-    camera.y = Math.max(0, Math.min(camera.y, WORLD_H - canvas.height));
+    const zoom = isMobile ? MOBILE_ZOOM : 1;
+    camera.x = player.x - canvas.width  / (2 * zoom);
+    camera.y = player.y - canvas.height / (2 * zoom);
+    camera.x = Math.max(0, Math.min(camera.x, WORLD_W - canvas.width  / zoom));
+    camera.y = Math.max(0, Math.min(camera.y, WORLD_H - canvas.height / zoom));
 }
 
 // ─── draw ─────────────────────────────────────────────────────────────────────
@@ -3544,6 +3546,7 @@ function gameLoop(timestamp) {
 
     // world-space drawing (affected by camera)
     ctx.save();
+    if (isMobile) ctx.scale(MOBILE_ZOOM, MOBILE_ZOOM);
     ctx.translate(-camera.x, -camera.y);
 
     drawFloor();
