@@ -778,14 +778,30 @@ const walls = buildWalls();
 })();
 
 // Extension outer walls
+// Door gap centred in the extension top wall
+const SLIDING_DOOR_W = 80;
+const SLIDING_DOOR_X = (EXTENSION.outerL + EXTENSION.outerR) / 2 - SLIDING_DOOR_W / 2;
+const SLIDING_DOOR_Y = EXTENSION.outerTop;
+
 (() => {
     const e = EXTENSION, t = e.t;
+    const dL = SLIDING_DOOR_X, dR = SLIDING_DOOR_X + SLIDING_DOOR_W;
     walls.push(
-        { x: e.outerL,     y: e.outerTop, w: t,                   h: e.intH + t }, // left outer wall
-        { x: e.outerR - t, y: e.outerTop, w: t,                   h: e.intH + t }, // right outer wall
-        { x: e.outerL,     y: e.outerTop, w: e.outerR - e.outerL, h: t           }, // top outer wall
+        { x: e.outerL,     y: e.outerTop, w: t,          h: e.intH + t }, // left outer wall
+        { x: e.outerR - t, y: e.outerTop, w: t,          h: e.intH + t }, // right outer wall
+        // top wall split around door gap
+        { x: e.outerL, y: e.outerTop, w: dL - e.outerL,           h: t }, // top-left of door
+        { x: dR,       y: e.outerTop, w: e.outerR - dR,           h: t }, // top-right of door
     );
 })();
+
+// Barrier sealing the door gap — removed from walls when power turns on
+const SLIDING_DOOR_BARRIER = {
+    x: SLIDING_DOOR_X, y: SLIDING_DOOR_Y,
+    w: SLIDING_DOOR_W, h: EXTENSION.t,
+    isSlidingDoor: true,
+};
+walls.push(SLIDING_DOOR_BARRIER);
 
 // Carve the door gap out of the main building's bottom wall.
 // buildWalls() created a segment to the right of the bottom window — split it.
@@ -2768,6 +2784,47 @@ function drawFurniture() {
     ctx.restore();
 }
 
+function drawSlidingDoor() {
+    const t = EXTENSION.t;
+    const x = SLIDING_DOOR_X, y = SLIDING_DOOR_Y, w = SLIDING_DOOR_W;
+    const mid = x + w / 2;
+
+    ctx.save();
+
+    // door frame — slightly darker inset border
+    ctx.fillStyle = '#1a1a22';
+    ctx.fillRect(x - 2, y - 2, w + 4, t + 4);
+
+    // left panel
+    ctx.fillStyle = '#2e2e3e';
+    ctx.fillRect(x, y, w / 2, t);
+    // right panel
+    ctx.fillRect(mid, y, w / 2, t);
+
+    // panel highlight lines (horizontal grooves)
+    ctx.strokeStyle = '#3d3d52';
+    ctx.lineWidth = 1;
+    for (let gy = y + 6; gy < y + t - 4; gy += 7) {
+        ctx.beginPath(); ctx.moveTo(x + 2, gy); ctx.lineTo(mid - 2, gy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(mid + 2, gy); ctx.lineTo(x + w - 2, gy); ctx.stroke();
+    }
+
+    // centre seam
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(mid, y); ctx.lineTo(mid, y + t); ctx.stroke();
+
+    // power indicator LEDs — red (no power)
+    const ledY = y + t / 2;
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = '#cc2020';
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath(); ctx.arc(x + 5, ledY, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w - 5, ledY, 2, 0, Math.PI * 2); ctx.fill();
+
+    ctx.restore();
+}
+
 function drawBuilding() {
     const b = BUILDING;
     const t = b.wallThickness;
@@ -2782,16 +2839,16 @@ function drawBuilding() {
     ctx.fillRect(ext.ent1L, b.y, ext.ent1R - ext.ent1L, t);
     ctx.fillRect(ext.ent2L, b.y, ext.ent2R - ext.ent2L, t);
 
-    // solid wall rects (furniture drawn separately)
+    // solid wall rects (furniture and custom doors drawn separately)
     ctx.fillStyle = '#2a2a2a';
     for (const wall of walls) {
-        if (wall.isFurniture) continue;
+        if (wall.isFurniture || wall.isSlidingDoor) continue;
         ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
     }
     ctx.strokeStyle = '#444';
     ctx.lineWidth = 2;
     for (const wall of walls) {
-        if (wall.isFurniture) continue;
+        if (wall.isFurniture || wall.isSlidingDoor) continue;
         ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
     }
 
@@ -3552,6 +3609,7 @@ function gameLoop(timestamp) {
     drawFloor();
     drawWorldBorder();
     drawBuilding();
+    drawSlidingDoor();
     drawExtraRoom();
     drawFurniture();
     drawGroundMarks();
