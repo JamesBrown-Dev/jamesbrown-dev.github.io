@@ -22,6 +22,12 @@ const camera = { x: 0, y: 0 };
 
 
 const PLAYER_SPEED  = 200;
+const isMobile = ('ontouchstart' in window) && navigator.maxTouchPoints > 0;
+const JOY_RADIUS = 60;
+let mobileMove = { x: 0, y: 0 };
+let leftTouch  = null; // { id, baseX, baseY, curX, curY }
+let rightTouch = null;
+let fTouchId   = null;
 const PLAYER_RADIUS = 14;
 const BULLET_LIFE   = 2.0; // seconds before expiring
 const GUN_TIP_X     = 18;  // barrel tip offset in player-local space
@@ -1375,6 +1381,102 @@ canvas.addEventListener('mousedown', () => {
 });
 canvas.addEventListener('mouseup', () => { mouseHeld = false; });
 
+// ─── mobile touch controls ────────────────────────────────────────────────────
+if (isMobile) {
+    const BTN_R = 40; // button hit-radius
+
+    function reloadBtn()   { return { x: canvas.width - 70, y: canvas.height - 110 }; }
+    function interactBtn() { return { x: 70,                y: canvas.height - 110 }; }
+
+    function inBtn(tx, ty, btn) { return Math.hypot(tx - btn.x, ty - btn.y) < BTN_R; }
+
+    function inHotbar(tx, ty) {
+        const slotSize = 54, gap = 6, totalW = 3 * slotSize + 2 * gap;
+        const hx = (canvas.width - totalW) / 2;
+        const hy = canvas.height - slotSize - 18;
+        if (ty < hy || ty > hy + slotSize) return -1;
+        for (let i = 0; i < 3; i++) {
+            const sx = hx + i * (slotSize + gap);
+            if (tx >= sx && tx <= sx + slotSize) return i;
+        }
+        return -1;
+    }
+
+    canvas.addEventListener('touchstart', e => {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            const tx = t.clientX, ty = t.clientY;
+
+            // hotbar weapon switch
+            const slot = inHotbar(tx, ty);
+            if (slot !== -1) { switchWeapon(slot); continue; }
+
+            // reload button
+            if (inBtn(tx, ty, reloadBtn())) {
+                if (!reloading && magAmmo < curWeaponDef().magSize && reserveAmmo[currentWeapon] > 0) {
+                    reloading = true; reloadTimer = curWeaponDef().reloadTime;
+                }
+                continue;
+            }
+
+            // interact (F) button
+            if (inBtn(tx, ty, interactBtn())) {
+                fTouchId = t.identifier; keys['f'] = true; continue;
+            }
+
+            // left half → movement joystick
+            if (tx < canvas.width / 2 && !leftTouch) {
+                leftTouch = { id: t.identifier, baseX: tx, baseY: ty, curX: tx, curY: ty };
+                continue;
+            }
+
+            // right half → aim / fire joystick
+            if (tx >= canvas.width / 2 && !rightTouch) {
+                rightTouch = { id: t.identifier, baseX: tx, baseY: ty, curX: tx, curY: ty };
+                if (firstShotCooldown <= 0) fireBloom = 0;
+                mouseHeld = true;
+                tryFire();
+            }
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            if (leftTouch && t.identifier === leftTouch.id) {
+                leftTouch.curX = t.clientX; leftTouch.curY = t.clientY;
+                const dx = leftTouch.curX - leftTouch.baseX;
+                const dy = leftTouch.curY - leftTouch.baseY;
+                const dist = Math.hypot(dx, dy) || 1;
+                const scale = Math.min(dist, JOY_RADIUS) / JOY_RADIUS;
+                mobileMove.x = (dx / dist) * scale;
+                mobileMove.y = (dy / dist) * scale;
+            }
+            if (rightTouch && t.identifier === rightTouch.id) {
+                rightTouch.curX = t.clientX; rightTouch.curY = t.clientY;
+                const dx = rightTouch.curX - rightTouch.baseX;
+                const dy = rightTouch.curY - rightTouch.baseY;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 10) {
+                    mouse.x = (player.x - camera.x) + (dx / dist) * 200;
+                    mouse.y = (player.y - camera.y) + (dy / dist) * 200;
+                }
+            }
+        }
+    }, { passive: false });
+
+    function onTouchEnd(e) {
+        e.preventDefault();
+        for (const t of e.changedTouches) {
+            if (leftTouch  && t.identifier === leftTouch.id)  { leftTouch = null; mobileMove.x = 0; mobileMove.y = 0; }
+            if (rightTouch && t.identifier === rightTouch.id) { rightTouch = null; mouseHeld = false; }
+            if (t.identifier === fTouchId)                     { fTouchId = null; keys['f'] = false; }
+        }
+    }
+    canvas.addEventListener('touchend',    onTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+}
+
 // ─── update ───────────────────────────────────────────────────────────────────
 
 function updatePlayer(dt) {
@@ -1393,6 +1495,7 @@ function updatePlayer(dt) {
     if (keys['a'] || keys['A'] || keys['ArrowLeft'])  dx -= 1;
     if (keys['d'] || keys['D'] || keys['ArrowRight']) dx += 1;
 
+    if (isMobile) { dx += mobileMove.x; dy += mobileMove.y; }
     if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
 
     player.x += dx * PLAYER_SPEED * dt;
@@ -3330,6 +3433,47 @@ function drawHealthBar() {
     ctx.fillText(`${Math.ceil(playerHp)}`, bx + barW + 8, by + barH - 1);
 }
 
+function drawMobileControls() {
+    if (!isMobile) return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    function drawJoy(touch, color) {
+        if (!touch) return;
+        const dx = touch.curX - touch.baseX;
+        const dy = touch.curY - touch.baseY;
+        const dist = Math.hypot(dx, dy);
+        const kx = touch.baseX + (dist > JOY_RADIUS ? (dx / dist) * JOY_RADIUS : dx);
+        const ky = touch.baseY + (dist > JOY_RADIUS ? (dy / dist) * JOY_RADIUS : dy);
+        // outer ring
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(touch.baseX, touch.baseY, JOY_RADIUS, 0, Math.PI * 2); ctx.stroke();
+        // knob
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(kx, ky, 24, 0, Math.PI * 2); ctx.fill();
+    }
+
+    drawJoy(leftTouch,  'rgba(255,255,255,0.35)');
+    drawJoy(rightTouch, mouseHeld ? 'rgba(220,60,60,0.55)' : 'rgba(255,255,255,0.35)');
+
+    function drawBtn(x, y, label, active) {
+        ctx.fillStyle = active ? 'rgba(220,140,0,0.75)' : 'rgba(60,60,60,0.65)';
+        ctx.beginPath(); ctx.arc(x, y, 40, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x, y, 40, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.font = 'bold 14px monospace';
+        ctx.fillText(label, x, y);
+    }
+
+    drawBtn(canvas.width - 70, canvas.height - 110, 'R',  reloading);
+    drawBtn(70,                canvas.height - 110, 'F',  fTouchId !== null);
+
+    ctx.restore();
+}
+
 function drawWaveHUD() {
     ctx.font      = 'bold 13px monospace';
     ctx.textAlign = 'center';
@@ -3431,6 +3575,7 @@ function gameLoop(timestamp) {
     drawWaveHUD();
     drawBarricadePrompt();
     drawMysteryBoxResult();
+    drawMobileControls();
 
     requestAnimationFrame(gameLoop);
 }
