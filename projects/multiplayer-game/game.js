@@ -333,6 +333,51 @@ const WEAPON_DEFS = [
             ctx.restore();
         },
     }),
+    new WeaponDef({
+        id: 7, name: 'blaster', magSize: 15, reloadTime: 1.6, cooldown: 0.22,
+        pellets: 1, spread: 0, cost: 350, bulletSpeed: 1100, aoeRadius: 0, reserve: 45,
+        muzzleX: 22, muzzleY: 9,
+        bulletRadius: 3, bulletColor: '#ff3030', bulletGlowing: true, bulletGlowColor: '#ff0000',
+        drawModel() {
+            // grip
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-2, 8, 5, 7);
+            ctx.fillStyle = '#2a2a2a'; ctx.fillRect(-1, 9, 2, 5);   // grip texture
+            // body
+            ctx.fillStyle = '#3a3a4a'; ctx.fillRect(3, 6, 9, 8);
+            // power cell glow
+            ctx.save();
+            ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 8;
+            ctx.fillStyle = '#ff4444';
+            ctx.beginPath(); ctx.arc(7, 10, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+            // barrel
+            ctx.fillStyle = '#555'; ctx.fillRect(12, 7, 10, 5);
+            ctx.fillStyle = '#222'; ctx.fillRect(12, 8, 10, 1);     // barrel seam
+            // muzzle
+            ctx.save();
+            ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 6;
+            ctx.fillStyle = '#ff6060';
+            ctx.fillRect(22, 7.5, 2, 4);
+            ctx.restore();
+        },
+        drawIcon(cx, cy) {
+            ctx.save(); ctx.translate(cx, cy);
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-13, 1, 5, 7);   // grip
+            ctx.fillStyle = '#3a3a4a'; ctx.fillRect(-8, -2, 9, 8);   // body
+            ctx.save();
+            ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 6;
+            ctx.fillStyle = '#ff4444';
+            ctx.beginPath(); ctx.arc(-3, 2, 2, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+            ctx.fillStyle = '#555'; ctx.fillRect(1, -1, 12, 5);      // barrel
+            ctx.save();
+            ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 5;
+            ctx.fillStyle = '#ff6060';
+            ctx.beginPath(); ctx.arc(14, 1.5, 1.5, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+            ctx.restore();
+        },
+    }),
 ];
 const RAYGUN_AOE_DAMAGE = 5;
 
@@ -355,7 +400,7 @@ class Bullet {
         this.startY     = y;
         this.age        = 0;
         this.isCrit     = weaponId === 6 && Math.random() < 0.25; // deagle 25% crit
-        this.pierceLeft = weaponId === 5 ? Infinity : 0;
+        this.pierceLeft = weaponId === 5 ? Infinity : weaponId === 7 ? 1 : 0;
     }
 
     update(dt) {
@@ -442,6 +487,29 @@ class Bullet {
             return;
         }
 
+
+        if (this.weaponId === 7) {
+            // ── Star Wars blaster bolt — elongated red capsule ──
+            const spd = Math.hypot(this.vx, this.vy) || 1;
+            const nx = this.vx / spd, ny = this.vy / spd;
+            ctx.save();
+            // outer glow
+            ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 14;
+            ctx.strokeStyle = '#cc0000'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(this.x - nx * 10, this.y - ny * 10);
+            ctx.lineTo(this.x + nx * 6,  this.y + ny * 6);
+            ctx.stroke();
+            // bright core
+            ctx.shadowBlur = 4;
+            ctx.strokeStyle = '#ffaaaa'; ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(this.x - nx * 9, this.y - ny * 9);
+            ctx.lineTo(this.x + nx * 5, this.y + ny * 5);
+            ctx.stroke();
+            ctx.restore();
+            return;
+        }
 
         if (this.glowing) {
             ctx.save();
@@ -1831,6 +1899,16 @@ const DEAGLE_PICKUP = (() => {
 
 let deagleBuyProgress = 0; // 0..1 while holding F near pickup
 
+// ─── blaster wall pickup ──────────────────────────────────────────────────────
+// left wall of the generator room, below the door gap
+const BLASTER_PICKUP = (() => {
+    const { roomL, hBot, roomB, t } = EAST_WING;
+    const midY = (hBot + roomB) / 2;
+    return { x: roomL - t, y: midY - 18, w: t, h: 36 };
+})();
+
+let blasterBuyProgress = 0;
+
 // ─── mystery box ──────────────────────────────────────────────────────────────
 const MYSTERY_BOX = (() => {
     const b = BUILDING, t = b.wallThickness;
@@ -2340,6 +2418,30 @@ function updateWeaponPickup(dt) {
             deagleBuyProgress = Math.max(0, deagleBuyProgress - dt * 3);
         }
     }
+
+    // ── blaster ──
+    {
+        const bp  = BLASTER_PICKUP;
+        const cx  = bp.x + bp.w / 2, cy = bp.y + bp.h / 2;
+        const near = Math.hypot(player.x - cx, player.y - cy) < BARRICADE_RANGE;
+        if (near && holding && !inventory.includes(7)) {
+            blasterBuyProgress = Math.min(1, blasterBuyProgress + dt / 1.5);
+            if (blasterBuyProgress >= 1) {
+                blasterBuyProgress = 0;
+                if (money < WEAPON_DEFS[7].cost) return;
+                money -= WEAPON_DEFS[7].cost;
+                let targetSlot = inventory.indexOf(-1);
+                if (targetSlot === -1) targetSlot = currentWeapon;
+                inventory[targetSlot]   = 7;
+                savedAmmo[targetSlot]   = WEAPON_DEFS[7].magSize;
+                reserveAmmo[targetSlot] = WEAPON_DEFS[7].reserve;
+                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[7].magSize; reloading = false; reloadTimer = 0; }
+                switchWeapon(targetSlot);
+            }
+        } else {
+            blasterBuyProgress = Math.max(0, blasterBuyProgress - dt * 3);
+        }
+    }
 }
 
 // outDir: angle in radians pointing away from the building (toward the zombie)
@@ -2559,6 +2661,7 @@ function updateBullets(dt) {
             if (b.weaponId === 2) spawnRaygunExplosion(b.x, b.y);
             else if (b.weaponId === 5) { spawnParticles(b.x, b.y, '#a0d8ff', 28, Math.atan2(b.vy, b.vx) + Math.PI); spawnParticles(b.x, b.y, '#ffffff', 10, Math.atan2(b.vy, b.vx) + Math.PI); }
             else if (b.weaponId === 6) { spawnParticles(b.x, b.y, '#ffe090', 20, Math.atan2(b.vy, b.vx) + Math.PI); spawnParticles(b.x, b.y, '#ffffff', 8,  Math.atan2(b.vy, b.vx) + Math.PI); }
+            else if (b.weaponId === 7) { spawnParticles(b.x, b.y, '#ff3030', 16, Math.atan2(b.vy, b.vx) + Math.PI); spawnParticles(b.x, b.y, '#ffaaaa', 6,  Math.atan2(b.vy, b.vx) + Math.PI); }
             else spawnParticles(b.x, b.y, '#f5e642', 8, Math.atan2(b.vy, b.vx) + Math.PI);
             bullets.splice(i, 1);
             continue;
@@ -2576,7 +2679,7 @@ function updateBullets(dt) {
                         bulletDead = true; break;
                     }
                     const deagleDmg = b.isCrit ? (z.isBoss ? 6 : 100) : 3;
-                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? deagleDmg : b.weaponId === 3 ? 2 : 1;
+                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? deagleDmg : b.weaponId === 7 ? 3 : b.weaponId === 3 ? 2 : 1;
                     z.hp -= dmg;
                     if (z.hp <= 0) {
                         const zx = z.x, zy = z.y;
@@ -2604,7 +2707,7 @@ function updateBullets(dt) {
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < (z.radius ?? ZOMBIE_RADIUS) * (z.radius ?? ZOMBIE_RADIUS)) {
                     if (b.weaponId === 2) { spawnRaygunExplosion(b.x, b.y); bulletDead = true; break; }
-                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? (b.isCrit ? 100 : 3) : b.weaponId === 3 ? 2 : 1;
+                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? (b.isCrit ? 100 : 3) : b.weaponId === 7 ? 3 : b.weaponId === 3 ? 2 : 1;
                     if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: dmg, angle: Math.atan2(b.vy, b.vx) });
                     if (b.isCrit) { spawnCritExplosion(b.x, b.y); critTexts.push({ x: b.x, y: b.y, timer: 0.7 }); }
                     else spawnParticles(b.x, b.y, '#cc2020', b.weaponId === 6 ? 18 : 8, Math.atan2(b.vy, b.vx) + Math.PI);
@@ -3461,8 +3564,8 @@ function drawMuzzleFlash(flash) {
     if (!flash || flash.timer <= 0) return;
     const t = flash.timer / 0.08; // 1 → 0 as it fades
     const isRailgun = flash.weaponId === 5;
-    const color     = isRailgun ? '#a0d8ff' : flash.weaponId === 2 ? '#80ffaa' : '#fff7a0';
-    const glowColor = isRailgun ? '#0050ff' : flash.weaponId === 2 ? '#40ff60' : '#ffcc00';
+    const color     = isRailgun ? '#a0d8ff' : flash.weaponId === 7 ? '#ff6060' : flash.weaponId === 2 ? '#80ffaa' : '#fff7a0';
+    const glowColor = isRailgun ? '#0050ff' : flash.weaponId === 7 ? '#ff0000' : flash.weaponId === 2 ? '#40ff60' : '#ffcc00';
     const size = (flash.weaponId === 1 ? 14 : flash.weaponId === 2 ? 10 : isRailgun ? 13 : 8) * t;
 
     ctx.save();
@@ -3647,6 +3750,45 @@ function drawWeaponPickup() {
             ctx.fillRect(dp.x + dp.w - 3, dp.y, 3, dp.h * deagleBuyProgress);
         }
     }
+
+    // ── blaster (generator room left wall, below door gap) ──
+    {
+        const bp = BLASTER_PICKUP;
+        const owned = inventory.includes(7);
+        ctx.fillStyle = '#202020';
+        ctx.fillRect(bp.x, bp.y, bp.w, bp.h);
+        ctx.strokeStyle = '#cc2020';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bp.x, bp.y, bp.w, bp.h);
+        const cx = bp.x + bp.w / 2, cy = bp.y + bp.h / 2;
+        ctx.save();
+        ctx.globalAlpha = owned ? 0.35 : 1.0;
+        ctx.translate(cx, cy);
+        ctx.rotate(Math.PI / 2);
+        // body
+        ctx.fillStyle = '#3a3a4a'; ctx.fillRect(-8, -3, 9, 8);
+        // power cell
+        ctx.save();
+        ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 6;
+        ctx.fillStyle = '#ff4444';
+        ctx.beginPath(); ctx.arc(-3, 1, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        // barrel
+        ctx.fillStyle = '#555'; ctx.fillRect(1, -2, 9, 5);
+        // muzzle glow
+        ctx.save();
+        ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 5;
+        ctx.fillStyle = '#ff6060';
+        ctx.beginPath(); ctx.arc(11, 0.5, 1.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        ctx.restore();
+        if (!owned && blasterBuyProgress > 0) {
+            ctx.fillStyle = '#330000';
+            ctx.fillRect(bp.x + bp.w - 3, bp.y, 3, bp.h);
+            ctx.fillStyle = '#ff4444';
+            ctx.fillRect(bp.x + bp.w - 3, bp.y, 3, bp.h * blasterBuyProgress);
+        }
+    }
 }
 
 function drawHudPrompt(text) {
@@ -3765,6 +3907,19 @@ function drawBarricadePrompt() {
             drawHudPrompt(canAfford
                 ? `[F] Buy Desert Eagle  £${WEAPON_DEFS[6].cost}`
                 : `Desert Eagle  £${WEAPON_DEFS[6].cost}  (need £${WEAPON_DEFS[6].cost - money} more)`);
+            return;
+        }
+    }
+
+    // blaster buy prompt
+    {
+        const bp  = BLASTER_PICKUP;
+        const bcx = bp.x + bp.w / 2, bcy = bp.y + bp.h / 2;
+        if (Math.hypot(player.x - bcx, player.y - bcy) < BARRICADE_RANGE && !inventory.includes(7)) {
+            const canAfford = money >= WEAPON_DEFS[7].cost;
+            drawHudPrompt(canAfford
+                ? `[F] Buy Blaster  £${WEAPON_DEFS[7].cost}`
+                : `Blaster  £${WEAPON_DEFS[7].cost}  (need £${WEAPON_DEFS[7].cost - money} more)`);
             return;
         }
     }
