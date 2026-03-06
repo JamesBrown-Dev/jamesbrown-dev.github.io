@@ -612,6 +612,12 @@ const BUILDING = {
     wallThickness: 24,
 };
 
+// Turret mounted on the exterior bottom-left corner of the building, barrel poking outward
+const TURRET = (() => {
+    const b = BUILDING;
+    return { x: b.x - 10, y: b.y + b.h + 10, range: 550, fireRate: 0.3 };
+})();
+
 // ─── extension room (above the main building top wall) ────────────────────────
 const EXTENSION = (() => {
     const b = BUILDING, t = b.wallThickness;
@@ -629,8 +635,9 @@ const EXTENSION = (() => {
 })();
 
 // ─── extra room (below the main building) ────────────────────────────────────
-const DOOR_GAP  = 70;   // width of the door opening in the bottom wall
-const DOOR_COST = 250;
+const DOOR_GAP      = 70;   // width of the door opening in the bottom wall
+const DOOR_COST     = 250;
+const GEN_ROOM_COST = 500;
 
 // Corridor + end room positioned below the building
 const EXTRA_ROOM = (() => {
@@ -836,6 +843,79 @@ const extraRoomWindows = (() => {
     ];
 })();
 
+// ─── east wing: corridor going north then east from end room top wall ─────────
+// Entry door replaces the left portion of the end room top-wall right segment.
+const EAST_WING = (() => {
+    const b  = BUILDING, t = b.wallThickness;
+    const { buildingBottomY, endRoomTopY, endRoomR } = EXTRA_ROOM;
+    const cR = EXTRA_ROOM.doorCX + DOOR_GAP / 2;
+    const CW = 80; // inner corridor width
+
+    // Vertical segment (alongside existing corridor, going north from end room)
+    const vL   = cR + t;          // left inner  (shares existing corridor right outer wall)
+    const vR   = vL + CW;         // right inner
+    const vTop = buildingBottomY; // top inner   (building south face)
+    const vBot = endRoomTopY;     // bottom inner (end room ceiling = entry door)
+
+    // Horizontal segment (turns east at building-bottom level)
+    const hTop = buildingBottomY;
+    const hBot = buildingBottomY + CW;
+
+    // New room inner bounds — centred on corridor mid-line
+    const roomL = vR + 220;       // left inner  (end of horizontal corridor)
+    const roomR = roomL + 300;    // right inner
+    const roomT = hTop - 100;     // top inner
+    const roomB = hBot + 100;     // bottom inner
+
+    const walls = [
+        // vertical corridor — right outer wall (only below the horizontal junction)
+        { x: vR,         y: hBot,          w: t,  h: vBot - hBot                },
+        // horizontal corridor — top outer wall (extends building bottom wall east)
+        { x: b.x + b.w,  y: vTop - t,      w: roomL - t - (b.x + b.w), h: t   },
+        // horizontal corridor — bottom outer wall (east of junction corner)
+        { x: vR + t,     y: hBot,          w: roomL - t - (vR + t),     h: t   },
+        // room — left wall above door gap
+        { x: roomL - t,  y: roomT - t,     w: t,  h: hTop - (roomT - t)        },
+        // room — left wall below door gap
+        { x: roomL - t,  y: hBot,          w: t,  h: roomB + t - hBot          },
+        // top / right / bottom walls are split around windows and added via genRoomWalls
+    ];
+
+    return { CW, t, vL, vR, vTop, vBot, hTop, hBot, roomL, roomR, roomT, roomB, walls };
+})();
+
+// Generator room windows — one on the top, right, and bottom walls
+const genRoomWindows = (() => {
+    const { roomL, roomR, roomT, roomB, t } = EAST_WING;
+    const midX = (roomL + roomR) / 2;
+    const midY = (roomT + roomB) / 2;
+    return [
+        new GameWindow(midX - WINDOW_GAP / 2, roomT - t, WINDOW_GAP, t, 'top'),
+        new GameWindow(roomR,                  midY - WINDOW_GAP / 2, t, WINDOW_GAP, 'right'),
+        new GameWindow(midX - WINDOW_GAP / 2, roomB,     WINDOW_GAP, t, 'bottom'),
+    ];
+})();
+
+// Generator room outer walls split around the three windows
+const genRoomWalls = (() => {
+    const { roomL, roomR, roomT, roomB, t } = EAST_WING;
+    const [winT, winR, winB] = genRoomWindows;
+    return [
+        // top wall — left of window
+        { x: roomL - t, y: roomT - t, w: winT.x - (roomL - t),              h: t },
+        // top wall — right of window
+        { x: winT.x + winT.w, y: roomT - t, w: (roomR + t) - (winT.x + winT.w), h: t },
+        // right wall — above window
+        { x: roomR, y: roomT - t, w: t, h: winR.y - (roomT - t)             },
+        // right wall — below window
+        { x: roomR, y: winR.y + winR.h, w: t, h: (roomB + t) - (winR.y + winR.h) },
+        // bottom wall — left of window
+        { x: roomL - t, y: roomB, w: winB.x - (roomL - t),                  h: t },
+        // bottom wall — right of window
+        { x: winB.x + winB.w, y: roomB, w: (roomR + t) - (winB.x + winB.w), h: t },
+    ];
+})();
+
 // Corridor + end room walls (end room side walls carved around windows)
 const extraRoomWalls = (() => {
     const r = EXTRA_ROOM, t = r.wallThickness;
@@ -851,7 +931,8 @@ const extraRoomWalls = (() => {
         // top-left segment: corner cap + gap for side-room door + remainder
         { x: endRoomL,                                              y: endRoomTopY, w: t,                                                          h: t },
         { x: SIDE_ROOM.doorX + SIDE_ROOM.SIDE_DOOR_W,             y: endRoomTopY, w: (cL - t) - (SIDE_ROOM.doorX + SIDE_ROOM.SIDE_DOOR_W),       h: t },
-        { x: cR + t,   y: endRoomTopY, w: endRoomR - (cR + t), h: t },
+        // right segment split: left portion is now the east-wing door gap
+        { x: EAST_WING.vR, y: endRoomTopY, w: endRoomR - EAST_WING.vR, h: t },
         // end room left wall — split around window
         { x: endRoomL, y: endRoomTopY,         w: t, h: winL.y - endRoomTopY },
         { x: endRoomL, y: winL.y + WINDOW_GAP, w: t, h: (endRoomTopY + END_ROOM_H + t) - (winL.y + WINDOW_GAP) },
@@ -890,6 +971,16 @@ const sideRoomWalls = (() => {
 walls.push(...sideRoomWalls);
 walls.push(SIDE_ROOM_BARRIER);
 windows.push(sideRoomWindow);
+walls.push(...EAST_WING.walls);
+walls.push(...genRoomWalls);
+
+// Barrier sealing the generator room entrance — removed when player pays £500
+const GEN_ROOM_BARRIER = (() => {
+    const { roomL, hTop, hBot, t } = EAST_WING;
+    return { x: roomL - t, y: hTop, w: t, h: hBot - hTop };
+})();
+walls.push(GEN_ROOM_BARRIER);
+windows.push(...genRoomWindows);
 
 // ─── indoor furniture (block walking, bullets, and zombie vision) ─────────────
 const FURNITURE = (() => {
@@ -928,10 +1019,46 @@ const FURNITURE = (() => {
 })();
 walls.push(...FURNITURE.barrels, FURNITURE.bookcase, ...FURNITURE.extraBarrels);
 
+// ─── generator room furniture & power switch ──────────────────────────────────
+const GEN_ROOM = (() => {
+    const { roomL, roomR, roomT, roomB, t } = EAST_WING;
+    const cx = (roomL + roomR) / 2;
+    const cy = (roomT + roomB) / 2;
+    const S  = 22; // barrel collision size
+
+    // Large generator body — central obstacle forces navigation around it
+    const generator = { x: cx - 60, y: cy - 28, w: 120, h: 56, isFurniture: true };
+
+    // Fuel barrel cluster — upper-left corner
+    const fuelBarrels = [
+        { x: roomL + 16, y: roomT + 22, w: S, h: S, isFurniture: true },
+        { x: roomL + 40, y: roomT + 44, w: S, h: S, isFurniture: true },
+        { x: roomL + 16, y: roomT + 48, w: S, h: S, isFurniture: true },
+    ];
+
+    // Workbench against top-right wall
+    const workbench = { x: roomR - 80, y: roomT + t, w: 70, h: 22, isFurniture: true };
+
+    // Power switch panel — mounted on right wall, upper area (not a collision rect)
+    const powerSwitch = { x: roomR, y: roomT + 55, w: t, h: 32 };
+
+    return { generator, fuelBarrels, workbench, powerSwitch, cx, cy };
+})();
+walls.push(GEN_ROOM.generator, ...GEN_ROOM.fuelBarrels, GEN_ROOM.workbench);
+
+let powerOn       = false;
+let powerLeverT   = 0;     // 0=off lever-down, 1=on lever-up (animated)
+let fPrevHeld     = false; // edge-detect for power switch tap
+let turretCooldown = 0;
+let turretAngle    = 0;    // current drawn barrel angle (smoothly rotated)
+let turretTargetAngle = 0; // desired barrel angle toward target
+
 let extraRoomUnlocked = false;
 let doorProgress      = 0; // 0..1 buy-progress
 let sideRoomUnlocked  = false;
 let sideRoomDoorProgress = 0; // 0..1 buy-progress
+let genRoomUnlocked   = false;
+let genRoomDoorProgress = 0; // 0..1 buy-progress
 
 // ─── collision helpers ────────────────────────────────────────────────────────
 
@@ -1108,6 +1235,15 @@ const NAV_WAYPOINTS = (() => {
         { x: e.outerL + t + R, y: e.outerTop + t + R }, // extension top-left corner
         { x: e.outerR - t - R, y: e.outerTop + t + R }, // extension top-right corner
         { x: (e.outerL + e.outerR) / 2, y: e.outerTop + t + R }, // extension top-centre
+        // ── east wing: vertical corridor, horizontal corridor, new room ──
+        { x: (EAST_WING.vL + EAST_WING.vR) / 2, y: EAST_WING.vTop + R    }, // top of vertical (junction)
+        { x: (EAST_WING.vL + EAST_WING.vR) / 2, y: EAST_WING.vBot - R    }, // bottom of vertical (end room entry)
+        { x: (EAST_WING.vR + EAST_WING.roomL) / 2, y: (EAST_WING.hTop + EAST_WING.hBot) / 2 }, // horizontal midpoint
+        { x: EAST_WING.roomL + R, y: EAST_WING.roomT + R }, // room top-left
+        { x: EAST_WING.roomR - R, y: EAST_WING.roomT + R }, // room top-right
+        { x: EAST_WING.roomL + R, y: EAST_WING.roomB - R }, // room bottom-left
+        { x: EAST_WING.roomR - R, y: EAST_WING.roomB - R }, // room bottom-right
+        { x: (EAST_WING.roomL + EAST_WING.roomR) / 2, y: (EAST_WING.roomT + EAST_WING.roomB) / 2 }, // room centre
     ];
 })();
 
@@ -1298,6 +1434,12 @@ function setupConnection() {
             if (!sideRoomUnlocked) {
                 sideRoomUnlocked = true;
                 const idx = walls.indexOf(SIDE_ROOM_BARRIER);
+                if (idx !== -1) walls.splice(idx, 1);
+            }
+        } else if (data.type === 'unlockGenRoom') {
+            if (!genRoomUnlocked) {
+                genRoomUnlocked = true;
+                const idx = walls.indexOf(GEN_ROOM_BARRIER);
                 if (idx !== -1) walls.splice(idx, 1);
             }
         }
@@ -1660,13 +1802,10 @@ const BARRICADE_REPAIR_TIME = 1.2; // seconds to hold F to add one plank
 const BARRICADE_RANGE       = 60;  // px from window centre
 
 // ─── shotgun wall pickup ──────────────────────────────────────────────────────
-// on the extra room top wall, right segment (between corridor right wall and extra room right)
+// right wall of main building, upper section (swapped with deagle)
 const SHOTGUN_PICKUP = (() => {
-    const t = BUILDING.wallThickness;
-    const { doorCX, endRoomTopY, endRoomR } = EXTRA_ROOM;
-    const cR   = doorCX + DOOR_GAP / 2;
-    const midX = (cR + t + endRoomR - t) / 2;        // midpoint of right top-wall segment
-    return { x: midX - 18, y: endRoomTopY, w: 36, h: t };
+    const b = BUILDING, t = b.wallThickness;
+    return { x: b.x + b.w - t, y: b.y + 70, w: t, h: 36 };
 })();
 
 let shotgunBuyProgress = 0; // 0..1 while holding F near pickup
@@ -1683,10 +1822,11 @@ const UZI_PICKUP = (() => {
 let uziBuyProgress = 0; // 0..1 while holding F near pickup
 
 // ─── deagle wall pickup ───────────────────────────────────────────────────────
-// on the right wall of the main building, upper section (above the right window)
+// right wall of the end room, lower section (below the right-wall window)
 const DEAGLE_PICKUP = (() => {
-    const b = BUILDING, t = b.wallThickness;
-    return { x: b.x + b.w - t, y: b.y + 70, w: t, h: 36 };
+    const t = BUILDING.wallThickness;
+    const { endRoomR, endRoomTopY, END_ROOM_H } = EXTRA_ROOM;
+    return { x: endRoomR - t, y: endRoomTopY + END_ROOM_H - 50, w: t, h: 36 };
 })();
 
 let deagleBuyProgress = 0; // 0..1 while holding F near pickup
@@ -1747,6 +1887,7 @@ function updateBarricadeRepair(dt) {
                 } else {
                     applyAddPlank(nearWinIdx); // solo
                 }
+                money += 10;
             }
         } else {
             win.buildProgress = Math.max(0, win.buildProgress - dt * 3);
@@ -1861,6 +2002,92 @@ function updateSideRoomDoor(dt) {
     }
 }
 
+function unlockGenRoom() {
+    genRoomUnlocked = true;
+    const idx = walls.indexOf(GEN_ROOM_BARRIER);
+    if (idx !== -1) walls.splice(idx, 1);
+    if (conn && conn.open) conn.send({ type: 'unlockGenRoom' });
+}
+
+function updateGenRoomDoor(dt) {
+    if (genRoomUnlocked) return;
+    const db   = GEN_ROOM_BARRIER;
+    const cx   = db.x + db.w / 2;
+    const cy   = db.y + db.h / 2;
+    const dist = Math.hypot(player.x - cx, player.y - cy);
+    const holding = isHoldingF();
+
+    if (dist < BARRICADE_RANGE && holding) {
+        if (money >= GEN_ROOM_COST) {
+            genRoomDoorProgress = Math.min(1, genRoomDoorProgress + dt / 1.5);
+            if (genRoomDoorProgress >= 1) {
+                genRoomDoorProgress = 0;
+                money -= GEN_ROOM_COST;
+                unlockGenRoom();
+            }
+        }
+    } else {
+        genRoomDoorProgress = Math.max(0, genRoomDoorProgress - dt * 3);
+    }
+}
+
+function updatePowerSwitch(dt) {
+    // Animate lever regardless of proximity
+    const target = powerOn ? 1 : 0;
+    powerLeverT += (target - powerLeverT) * Math.min(1, dt * 8);
+
+    if (!genRoomUnlocked) return;
+    const ps   = GEN_ROOM.powerSwitch;
+    const cx   = ps.x - ps.w / 2;
+    const cy   = ps.y + ps.h / 2;
+    const dist = Math.hypot(player.x - cx, player.y - cy);
+    const holding = isHoldingF();
+
+    // rising-edge tap — turn power on (one-way, cannot be switched off)
+    if (holding && !fPrevHeld && dist < BARRICADE_RANGE && !powerOn) {
+        powerOn = true;
+    }
+    fPrevHeld = holding;
+}
+
+function updateTurret(dt) {
+    turretCooldown = Math.max(0, turretCooldown - dt);
+    if (!powerOn) return;
+
+    // Barrel tracks the nearest zombie in range that has clear LOS from the muzzle
+    let target = null, bestDist = Infinity;
+    for (const z of zombies) {
+        const d = Math.hypot(z.x - TURRET.x, z.y - TURRET.y);
+        if (d >= TURRET.range || d >= bestDist) continue;
+        const angle = Math.atan2(z.y - TURRET.y, z.x - TURRET.x);
+        const muzzleX = TURRET.x + Math.cos(angle) * 22;
+        const muzzleY = TURRET.y + Math.sin(angle) * 22;
+        if (hasLineOfSight(muzzleX, muzzleY, z.x, z.y)) { target = z; bestDist = d; }
+    }
+
+    // Rotate barrel toward target at a fixed turn speed (radians/sec), shortest arc
+    const TURN_SPEED = Math.PI * 1.5; // ~270°/s
+    if (target) {
+        turretTargetAngle = Math.atan2(target.y - TURRET.y, target.x - TURRET.x);
+    }
+    let diff = ((turretTargetAngle - turretAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    const step = TURN_SPEED * dt;
+    turretAngle += Math.abs(diff) < step ? diff : Math.sign(diff) * step;
+
+    if (!target) return;
+
+    if (turretCooldown <= 0) {
+        const muzzleX = TURRET.x + Math.cos(turretAngle) * 22;
+        const muzzleY = TURRET.y + Math.sin(turretAngle) * 22;
+        if (!hasLineOfSight(muzzleX, muzzleY, target.x, target.y)) return;
+        turretCooldown = TURRET.fireRate;
+        const spd = 800;
+        const b = new Bullet(muzzleX, muzzleY, Math.cos(turretAngle) * spd, Math.sin(turretAngle) * spd, 0);
+        b.isTurret = true;
+        bullets.push(b);
+    }
+}
+
 function drawExtraRoom() {
     const r = EXTRA_ROOM, t = r.wallThickness;
     const { doorCX, buildingBottomY, CORRIDOR_H, END_ROOM_W, END_ROOM_H, endRoomL, endRoomTopY } = r;
@@ -1875,6 +2102,51 @@ function drawExtraRoom() {
 
     // end room floor (wider area at the bottom of the corridor)
     ctx.fillRect(endRoomL + t, endRoomTopY + t, END_ROOM_W - t * 2, END_ROOM_H - t);
+
+    // ── east wing floors ──
+    const ew = EAST_WING;
+    // vertical corridor alongside existing corridor
+    ctx.fillRect(ew.vL, ew.vTop, ew.vR - ew.vL, ew.vBot - ew.vTop);
+    // horizontal corridor turning east
+    ctx.fillRect(ew.vR, ew.hTop, ew.roomL - ew.vR, ew.hBot - ew.hTop);
+    // new room
+    ctx.fillRect(ew.roomL, ew.roomT, ew.roomR - ew.roomL, ew.roomB - ew.roomT);
+
+    // gen room door — wooden panel when locked, open when unlocked
+    const gdb = GEN_ROOM_BARRIER;
+    if (!genRoomUnlocked) {
+        ctx.fillStyle = '#5a3e14';
+        ctx.fillRect(gdb.x, gdb.y, gdb.w, gdb.h);
+        ctx.strokeStyle = '#8B6020';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(gdb.x, gdb.y, gdb.w, gdb.h);
+
+        // decorative panel line across the middle
+        ctx.strokeStyle = '#4a3010';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const gmid = gdb.y + gdb.h / 2;
+        ctx.moveTo(gdb.x + 3, gmid);
+        ctx.lineTo(gdb.x + gdb.w - 3, gmid);
+        ctx.stroke();
+
+        // price label to the left of the door (in the corridor)
+        ctx.save();
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#e8c060';
+        ctx.fillText(`[F] £${GEN_ROOM_COST}`, gdb.x - 4, gdb.y + gdb.h / 2);
+        ctx.restore();
+
+        // progress bar (above the door rect)
+        if (genRoomDoorProgress > 0) {
+            ctx.fillStyle = '#222';
+            ctx.fillRect(gdb.x - 9, gdb.y, 4, gdb.h);
+            ctx.fillStyle = '#e8c060';
+            ctx.fillRect(gdb.x - 9, gdb.y + gdb.h * (1 - genRoomDoorProgress), 4, gdb.h * genRoomDoorProgress);
+        }
+    }
 
     // door — wooden panels when locked, open gap when unlocked
     const db = DOOR_BARRIER;
@@ -2303,14 +2575,6 @@ function updateBullets(dt) {
                         spawnRaygunExplosion(b.x, b.y);
                         bulletDead = true; break;
                     }
-                    // count nearby shotgun pellets in this volley
-                    let shotgunVolley = 0;
-                    if (b.weaponId === 1) {
-                        for (const ob of bullets) {
-                            if (ob.weaponId === 1 && Math.hypot(ob.x - z.x, ob.y - z.y) < ZOMBIE_RADIUS * 2) shotgunVolley++;
-                        }
-                        if (shotgunVolley >= 12 && !z.isBoss) z.hp = -9999; // instant kill (not boss)
-                    }
                     const deagleDmg = b.isCrit ? (z.isBoss ? 6 : 100) : 3;
                     const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? deagleDmg : b.weaponId === 3 ? 2 : 1;
                     z.hp -= dmg;
@@ -2321,7 +2585,6 @@ function updateBullets(dt) {
                         spawnBloodSmear(zx, zy);
                         trySpawnAmmoDrop(zx, zy);
                         if (conn && conn.open) conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
-                        if (shotgunVolley >= 12) spawnCritExplosion(zx, zy);
                     } else {
                         const ba = Math.atan2(b.vy, b.vx);
                         const kbForce = b.weaponId === 6 ? (b.isCrit ? 600 : 420) : 260;
@@ -2329,7 +2592,7 @@ function updateBullets(dt) {
                         z.kbVy += Math.sin(ba) * kbForce;
                     }
                     if (b.isCrit) { spawnCritExplosion(b.x, b.y); critTexts.push({ x: b.x, y: b.y, timer: 0.7 }); }
-                    else if (shotgunVolley < 6) spawnParticles(b.x, b.y, '#cc2020', b.weaponId === 6 ? 18 : 8, Math.atan2(b.vy, b.vx) + Math.PI);
+                    else spawnParticles(b.x, b.y, '#cc2020', b.weaponId === 6 ? 18 : 8, Math.atan2(b.vy, b.vx) + Math.PI);
                     zombieHit = true;
                     if (b.pierceLeft > 0) { b.pierceLeft--; }
                     else { bulletDead = true; break; }
@@ -2341,16 +2604,9 @@ function updateBullets(dt) {
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < (z.radius ?? ZOMBIE_RADIUS) * (z.radius ?? ZOMBIE_RADIUS)) {
                     if (b.weaponId === 2) { spawnRaygunExplosion(b.x, b.y); bulletDead = true; break; }
-                    let shotgunVolley = 0;
-                    if (b.weaponId === 1) {
-                        for (const ob of bullets) {
-                            if (ob.weaponId === 1 && Math.hypot(ob.x - z.x, ob.y - z.y) < ZOMBIE_RADIUS * 2) shotgunVolley++;
-                        }
-                    }
                     const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? (b.isCrit ? 100 : 3) : b.weaponId === 3 ? 2 : 1;
-                    if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: shotgunVolley >= 12 ? 9999 : dmg, angle: Math.atan2(b.vy, b.vx) });
+                    if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: dmg, angle: Math.atan2(b.vy, b.vx) });
                     if (b.isCrit) { spawnCritExplosion(b.x, b.y); critTexts.push({ x: b.x, y: b.y, timer: 0.7 }); }
-                    else if (shotgunVolley >= 12) spawnCritExplosion(b.x, b.y);
                     else spawnParticles(b.x, b.y, '#cc2020', b.weaponId === 6 ? 18 : 8, Math.atan2(b.vy, b.vx) + Math.PI);
                     zombieHit = true;
                     if (b.pierceLeft > 0) { b.pierceLeft--; }
@@ -2413,61 +2669,73 @@ function spawnBoss() {
     const margin = bossRadius + 4;
     const available = windows.filter(w => {
         if (extraRoomWindows.includes(w)) return extraRoomUnlocked;
-        if (w === sideRoomWindow) return sideRoomUnlocked;
+        if (w === sideRoomWindow)         return sideRoomUnlocked;
+        if (genRoomWindows.includes(w))   return genRoomUnlocked;
         return true;
     });
-    const win = available[Math.floor(Math.random() * available.length)];
-    const ap  = windowApproachPoint(win);
-    let sx, sy;
-    if (win.side === 'top')    { sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x)); sy = margin; }
-    else if (win.side === 'bottom') { sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x)); sy = WORLD_H - margin; }
-    else if (win.side === 'left')   { sx = margin; sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y)); }
-    else                            { sx = WORLD_W - margin; sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y)); }
-    const z = new Zombie(sx, sy, win);
-    z.isBoss  = true;
-    z.hp      = 30;
-    z.maxHp   = 30;
-    z.radius  = bossRadius;
-    z.speed   = ZOMBIE_WAVE_SPEED(wave) * 0.75;
-    z.waypoints = computePathToWindow(sx, sy, win);
-    zombies.push(z);
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+        const win = available[Math.floor(Math.random() * available.length)];
+        const ap  = windowApproachPoint(win);
+        let sx, sy;
+        if (win.side === 'top')         { sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x)); sy = margin; }
+        else if (win.side === 'bottom') { sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x)); sy = WORLD_H - margin; }
+        else if (win.side === 'left')   { sx = margin; sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y)); }
+        else                            { sx = WORLD_W - margin; sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y)); }
+
+        if (!hasLineOfSight(sx, sy, ap.x, ap.y)) continue;
+
+        const z = new Zombie(sx, sy, win);
+        z.isBoss  = true;
+        z.hp      = 30;
+        z.maxHp   = 30;
+        z.radius  = bossRadius;
+        z.speed   = ZOMBIE_WAVE_SPEED(wave) * 0.75;
+        z.waypoints = computePathToWindow(sx, sy, win);
+        zombies.push(z);
+        return;
+    }
 }
 
 function spawnZombie() {
     const margin = ZOMBIE_RADIUS + 4;
+    const spread = 400;
 
-    // Pick the target window first, then spawn on the edge that faces it.
-    // This guarantees the zombie has direct line of sight and never needs
-    // to route around the building.
     const available = windows.filter(w => {
         if (extraRoomWindows.includes(w)) return extraRoomUnlocked;
-        if (w === sideRoomWindow) return sideRoomUnlocked;
+        if (w === sideRoomWindow)         return sideRoomUnlocked;
+        if (genRoomWindows.includes(w))   return genRoomUnlocked;
         return true;
     });
-    const win = available[Math.floor(Math.random() * available.length)];
-    const ap  = windowApproachPoint(win);
 
-    // Spawn at a random position along the world edge that faces the approach point,
-    // biased toward the approach point's axis position (±400 px spread).
-    const spread = 400;
-    let sx, sy;
-    if (win.side === 'top') {
-        sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x + (Math.random() - 0.5) * spread));
-        sy = margin;
-    } else if (win.side === 'bottom') {
-        sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x + (Math.random() - 0.5) * spread));
-        sy = WORLD_H - margin;
-    } else if (win.side === 'left') {
-        sx = margin;
-        sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y + (Math.random() - 0.5) * spread));
-    } else { // right
-        sx = WORLD_W - margin;
-        sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y + (Math.random() - 0.5) * spread));
+    // Retry until a spawn position has direct line of sight to its window,
+    // so zombies never materialise behind a wall or inside a room.
+    for (let attempt = 0; attempt < 10; attempt++) {
+        const win = available[Math.floor(Math.random() * available.length)];
+        const ap  = windowApproachPoint(win);
+
+        let sx, sy;
+        if (win.side === 'top') {
+            sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x + (Math.random() - 0.5) * spread));
+            sy = margin;
+        } else if (win.side === 'bottom') {
+            sx = Math.max(margin, Math.min(WORLD_W - margin, ap.x + (Math.random() - 0.5) * spread));
+            sy = WORLD_H - margin;
+        } else if (win.side === 'left') {
+            sx = margin;
+            sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y + (Math.random() - 0.5) * spread));
+        } else { // right
+            sx = WORLD_W - margin;
+            sy = Math.max(margin, Math.min(WORLD_H - margin, ap.y + (Math.random() - 0.5) * spread));
+        }
+
+        if (!hasLineOfSight(sx, sy, ap.x, ap.y)) continue;
+
+        const z = new Zombie(sx, sy, win);
+        z.waypoints = computePathToWindow(sx, sy, win);
+        zombies.push(z);
+        return;
     }
-
-    const z = new Zombie(sx, sy, win);
-    z.waypoints = computePathToWindow(sx, sy, win);
-    zombies.push(z);
 }
 
 // True when this client is responsible for simulating zombies.
@@ -2779,6 +3047,197 @@ function drawFurniture() {
         ctx.moveTo(r.x + 1, r.y + 1);
         ctx.lineTo(r.x + r.w - 1, r.y + 1);
         ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+function drawGenRoom() {
+    const { roomR, t } = EAST_WING;
+    const { generator: gen, fuelBarrels, workbench: wb, powerSwitch: ps } = GEN_ROOM;
+
+    ctx.save();
+
+    // ── fuel barrels (match existing barrel style) ──
+    for (const rect of fuelBarrels) {
+        const bx = rect.x + rect.w / 2, by = rect.y + rect.h / 2, r = rect.w / 2;
+        ctx.fillStyle = '#3d2b0e';
+        ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#6a6a6a'; ctx.lineWidth = 2.5;
+        for (const oy of [-r * 0.38, r * 0.38]) {
+            const hw = Math.sqrt(Math.max(0, r * r - oy * oy));
+            ctx.beginPath(); ctx.moveTo(bx - hw, by + oy); ctx.lineTo(bx + hw, by + oy); ctx.stroke();
+        }
+        ctx.fillStyle = '#222';
+        ctx.beginPath(); ctx.arc(bx, by, r * 0.32, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ── workbench ──
+    ctx.fillStyle = '#3a2a10';
+    ctx.fillRect(wb.x, wb.y, wb.w, wb.h);
+    ctx.strokeStyle = '#5a4020'; ctx.lineWidth = 1;
+    ctx.strokeRect(wb.x, wb.y, wb.w, wb.h);
+    // tools on surface
+    ctx.fillStyle = '#777';
+    ctx.fillRect(wb.x + 8,  wb.y + 5, 20, 4);  // wrench
+    ctx.fillRect(wb.x + 36, wb.y + 4, 5, 14);  // screwdriver handle
+    ctx.fillStyle = '#555';
+    ctx.fillRect(wb.x + 37, wb.y + 3, 3, 5);   // tip
+
+    // ── generator body ──
+    const gx = gen.x, gy = gen.y, gw = gen.w, gh = gen.h;
+
+    // base plate
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(gx - 3, gy + gh - 5, gw + 6, 9);
+
+    // body
+    ctx.fillStyle = '#2a4a2a';
+    ctx.fillRect(gx, gy, gw, gh);
+
+    // warning stripes — left end
+    ctx.save();
+    ctx.beginPath(); ctx.rect(gx, gy, 18, gh); ctx.clip();
+    const sw = 8;
+    ctx.fillStyle = '#c49010';
+    for (let si = -gh; si < gw + gh; si += sw * 2) {
+        ctx.beginPath();
+        ctx.moveTo(gx + si, gy); ctx.lineTo(gx + si + sw, gy);
+        ctx.lineTo(gx + si + sw - gh, gy + gh); ctx.lineTo(gx + si - gh, gy + gh);
+        ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+
+    // exhaust pipe — right end, sticking up
+    ctx.fillStyle = '#444';
+    ctx.fillRect(gx + gw - 14, gy - 13, 10, 15);
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(gx + gw - 9, gy - 13, 5, Math.PI, 0); ctx.fill();
+
+    // recessed vent panel
+    ctx.fillStyle = '#1e3a1e';
+    ctx.fillRect(gx + 22, gy + 6, gw - 38, gh - 12);
+    ctx.fillStyle = '#111';
+    for (let vi = 0; vi < 5; vi++) {
+        ctx.fillRect(gx + 26, gy + 10 + vi * 7, gw - 48, 3);
+    }
+
+    // gauges — power (red/off) and fuel (amber)
+    const gaugeCX = gx + gw - 20;
+    for (const [oy, col] of [[10, '#cc2020'], [26, '#c87820']]) {
+        ctx.fillStyle = '#333';
+        ctx.beginPath(); ctx.arc(gaugeCX, gy + oy, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(gaugeCX, gy + oy, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // rivets
+    ctx.fillStyle = '#888';
+    for (const [bx, by] of [[gx+4,gy+4],[gx+gw-5,gy+4],[gx+4,gy+gh-5],[gx+gw-5,gy+gh-5]]) {
+        ctx.beginPath(); ctx.arc(bx, by, 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    ctx.strokeStyle = '#4a6a4a'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(gx, gy, gw, gh);
+
+    // ── cable from generator to power switch (conduit along wall) ──
+    const cableY = gy + 8;
+    const wallX  = roomR - t;
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 4;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(gx + gw, cableY); ctx.lineTo(wallX, cableY);
+    ctx.lineTo(wallX, ps.y + ps.h / 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(gx + gw, cableY); ctx.lineTo(wallX, cableY);
+    ctx.lineTo(wallX, ps.y + ps.h / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── power switch panel (mounted on right wall) ──
+    const px = ps.x - ps.w, py = ps.y, ph = ps.h;
+    const pcx = px + ps.w / 2;
+    // lever position: T=0 → bottom (off), T=1 → top (on)
+    const leverSlotH  = ph - 8;
+    const leverOffY   = py + 4 + leverSlotH - 10; // lever bottom position
+    const leverOnY    = py + 4;                    // lever top position
+    const leverY      = leverOffY + (leverOnY - leverOffY) * powerLeverT;
+    // colours interpolated between red (off) and green (on)
+    const r = Math.round(187 * (1 - powerLeverT) + 20  * powerLeverT);
+    const g = Math.round(32  * (1 - powerLeverT) + 187 * powerLeverT);
+    const leverCol = `rgb(${r},${g},20)`;
+    const ledR     = Math.round(255 * (1 - powerLeverT) + 40  * powerLeverT);
+    const ledG     = Math.round(68  * (1 - powerLeverT) + 255 * powerLeverT);
+    const ledCol   = `rgb(${ledR},${ledG},40)`;
+    const glowCol  = powerOn ? '#20ff40' : '#ff2020';
+
+    // panel box
+    ctx.fillStyle = '#22222e';
+    ctx.fillRect(px - 4, py - 5, ps.w + 5, ph + 10);
+    ctx.strokeStyle = '#3a3a4e'; ctx.lineWidth = 1;
+    ctx.strokeRect(px - 4, py - 5, ps.w + 5, ph + 10);
+    // lever slot
+    ctx.fillStyle = '#111';
+    ctx.fillRect(pcx - 2, py + 4, 4, leverSlotH);
+    // lever handle (animated)
+    ctx.fillStyle = leverCol;
+    ctx.fillRect(pcx - 3, leverY, 6, 10);
+    // indicator LED (colour-animated)
+    ctx.shadowBlur = 8; ctx.shadowColor = glowCol;
+    ctx.fillStyle = ledCol;
+    ctx.beginPath(); ctx.arc(pcx, py - 1, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // label
+    ctx.font = 'bold 7px monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillStyle = '#888';
+    ctx.fillText('PWR', pcx, py + ph + 8);
+
+    ctx.restore();
+}
+
+function drawTurret() {
+    const { x, y } = TURRET;
+    ctx.save();
+    ctx.translate(x, y);
+
+    // static base plate bolted to the corner
+    ctx.fillStyle = '#2e2e2e';
+    ctx.fillRect(-11, -11, 22, 22);
+    ctx.strokeStyle = '#4a4a4a';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-11, -11, 22, 22);
+    // corner bolts
+    ctx.fillStyle = '#666';
+    for (const [bx, by] of [[-7, -7], [7, -7], [-7, 7], [7, 7]]) {
+        ctx.beginPath(); ctx.arc(bx, by, 2, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // rotating dome + barrel
+    ctx.rotate(turretAngle);
+
+    ctx.fillStyle = powerOn ? '#1a3a1a' : '#222';
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = powerOn ? '#3a7a3a' : '#444';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.stroke();
+
+    // barrel
+    ctx.fillStyle = '#111';
+    ctx.fillRect(5, -2.5, 18, 5);
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(20, -3, 3, 6); // flash guard
+
+    if (powerOn) {
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = '#40ff60';
+        ctx.strokeStyle = 'rgba(60,220,80,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.stroke();
+        ctx.shadowBlur = 0;
     }
 
     ctx.restore();
@@ -3104,7 +3563,7 @@ function drawCritTexts() {
 // ─── weapon pickup (world-space) ─────────────────────────────────────────────
 
 function drawWeaponPickup() {
-    // ── shotgun (extra room top wall, right segment) ──
+    // ── shotgun (main building right wall, upper section) ──
     {
         const sp = SHOTGUN_PICKUP;
         const owned = inventory.includes(1);
@@ -3162,7 +3621,7 @@ function drawWeaponPickup() {
         }
     }
 
-    // ── deagle (right wall, upper section) ──
+    // ── deagle (end room right wall, lower section) ──
     {
         const dp = DEAGLE_PICKUP;
         const owned = inventory.includes(6);
@@ -3229,6 +3688,30 @@ function drawBarricadePrompt() {
                 ? `[F] Unlock Side Room  £${DOOR_COST}`
                 : `Unlock Side Room  £${DOOR_COST}  (need £${DOOR_COST - money} more)`;
             drawHudPrompt(label);
+            return;
+        }
+    }
+
+    // generator room door prompt
+    if (!genRoomUnlocked) {
+        const gdb = GEN_ROOM_BARRIER;
+        const gcx = gdb.x + gdb.w / 2, gcy = gdb.y + gdb.h / 2;
+        if (Math.hypot(player.x - gcx, player.y - gcy) < BARRICADE_RANGE) {
+            const canAfford = money >= GEN_ROOM_COST;
+            const label = canAfford
+                ? `[F] Unlock Generator Room  £${GEN_ROOM_COST}`
+                : `Unlock Generator Room  £${GEN_ROOM_COST}  (need £${GEN_ROOM_COST - money} more)`;
+            drawHudPrompt(label);
+            return;
+        }
+    }
+
+    // power switch prompt
+    if (genRoomUnlocked) {
+        const ps  = GEN_ROOM.powerSwitch;
+        const pcx = ps.x - ps.w / 2, pcy = ps.y + ps.h / 2;
+        if (Math.hypot(player.x - pcx, player.y - pcy) < BARRICADE_RANGE) {
+            drawHudPrompt(powerOn ? 'Power is ON' : '[F] Power ON');
             return;
         }
     }
@@ -3595,6 +4078,9 @@ function gameLoop(timestamp) {
     updateMysteryBox(dt);
     updateExtraRoomDoor(dt);
     updateSideRoomDoor(dt);
+    updateGenRoomDoor(dt);
+    updatePowerSwitch(dt);
+    updateTurret(dt);
     updateZombies(dt);
     updateJoinerZombieDamage(dt);
     updateCamera();
@@ -3612,6 +4098,8 @@ function gameLoop(timestamp) {
     drawSlidingDoor();
     drawExtraRoom();
     drawFurniture();
+    drawGenRoom();
+    drawTurret();
     drawGroundMarks();
     drawMysteryBox();
     drawWeaponPickup();
