@@ -81,7 +81,7 @@ class WeaponDef {
 const WEAPON_DEFS = [
     new WeaponDef({
         id: 0, name: 'pistol', magSize: 8, reloadTime: 1.5, cooldown: 0.25,
-        pellets: 1, spread: 0, cost: 0, bulletSpeed: 750, aoeRadius: 0, reserve: Infinity,
+        autoFire: true, pellets: 1, spread: 0, cost: 0, bulletSpeed: 750, aoeRadius: 0, reserve: Infinity,
         bulletRadius: 2, bulletColor: '#f5e642',
         drawModel() {
             ctx.fillStyle = '#111';
@@ -98,7 +98,7 @@ const WEAPON_DEFS = [
     }),
     new WeaponDef({
         id: 1, name: 'shotgun', magSize: 2, reloadTime: 2.2, cooldown: 0.9,
-        pellets: 12, spread: 0.28, cost: 200, bulletSpeed: 750, aoeRadius: 0, reserve: 16,
+        autoFire: true, pellets: 12, spread: 0.28, cost: 200, bulletSpeed: 750, aoeRadius: 0, reserve: 16,
         muzzleX: 22, muzzleY: 10,
         bulletRadius: 2, bulletColor: '#f5e642',
         drawModel() {
@@ -120,7 +120,7 @@ const WEAPON_DEFS = [
     }),
     new WeaponDef({
         id: 2, name: 'raygun', magSize: 12, reloadTime: 1.8, cooldown: 0.5,
-        pellets: 1, spread: 0, cost: 0, bulletSpeed: 900, aoeRadius: 80, reserve: 36,
+        autoFire: true, pellets: 1, spread: 0, cost: 0, bulletSpeed: 900, aoeRadius: 80, reserve: 36,
         muzzleX: 22, muzzleY: 11,
         bulletRadius: 4, bulletColor: '#80ffaa', bulletGlowing: true, bulletGlowColor: '#40ff60',
         drawModel() {
@@ -220,7 +220,7 @@ const WEAPON_DEFS = [
     }),
     new WeaponDef({
         id: 5, name: 'railgun', magSize: 4, reloadTime: 2.8, cooldown: 1.0,
-        pellets: 1, spread: 0, cost: 0, bulletSpeed: 2000, aoeRadius: 0, reserve: 12,
+        autoFire: true, pellets: 1, spread: 0, cost: 0, bulletSpeed: 2000, aoeRadius: 0, reserve: 12,
         muzzleX: 32, muzzleY: 10,
         bulletRadius: 3, bulletColor: '#a0d8ff', bulletGlowing: true, bulletGlowColor: '#0060ff',
         drawModel() {
@@ -311,7 +311,7 @@ const WEAPON_DEFS = [
     }),
     new WeaponDef({
         id: 6, name: 'deagle', magSize: 7, reloadTime: 1.8, cooldown: 0.45,
-        pellets: 1, spread: 0.02, cost: 300, bulletSpeed: 1100, aoeRadius: 0, reserve: 28,
+        autoFire: true, pellets: 1, spread: 0.02, cost: 300, bulletSpeed: 1100, aoeRadius: 0, reserve: 28,
         muzzleX: 22, muzzleY: 9,
         bulletRadius: 3, bulletColor: '#f5e642',
         drawModel() {
@@ -335,7 +335,7 @@ const WEAPON_DEFS = [
     }),
     new WeaponDef({
         id: 7, name: 'blaster', magSize: 15, reloadTime: 1.6, cooldown: 0.22,
-        pellets: 1, spread: 0, cost: 350, bulletSpeed: 1100, aoeRadius: 0, reserve: 45,
+        autoFire: true, pellets: 1, spread: 0, cost: 350, bulletSpeed: 1100, aoeRadius: 0, reserve: 45,
         muzzleX: 22, muzzleY: 9,
         bulletRadius: 3, bulletColor: '#ff3030', bulletGlowing: true, bulletGlowColor: '#ff0000',
         drawModel() {
@@ -400,7 +400,7 @@ class Bullet {
         this.startY     = y;
         this.age        = 0;
         this.isCrit     = weaponId === 6 && Math.random() < 0.25; // deagle 25% crit
-        this.pierceLeft = weaponId === 5 ? Infinity : weaponId === 7 ? 1 : 0;
+        this.pierceLeft = weaponId === 5 ? Infinity : 0;
     }
 
     update(dt) {
@@ -568,9 +568,9 @@ class Particle {
 }
 
 let currentWeapon  = 0;                                    // active slot index
-let inventory      = [0, -1, -1];                          // WEAPON_DEFS id per slot; -1 = empty
-let savedAmmo      = [WEAPON_DEFS[0].magSize, 0, 0];
-let reserveAmmo    = [Infinity, 0, 0];                    // reserve (spare) ammo per slot
+let inventory      = [0, 7, -1];                          // WEAPON_DEFS id per slot; -1 = empty
+let savedAmmo      = [WEAPON_DEFS[0].magSize, WEAPON_DEFS[7].magSize, 0];
+let reserveAmmo    = [Infinity, WEAPON_DEFS[7].reserve, 0];                    // reserve (spare) ammo per slot
 let weaponCooldown     = 0;
 let mouseHeld          = false;
 let fireBloom          = 0;   // accumulated extra spread while holding trigger
@@ -613,13 +613,15 @@ let remoteMuzzleFlash = null;
 
 let localPlayerName = 'Player';
 
-let money = 0; // currency — to be used for future upgrades/purchases
+let money = 5000; // currency — to be used for future upgrades/purchases
 
 // ─── player health ────────────────────────────────────────────────────────────
 
 const PLAYER_MAX_HP = 100;
 let playerHp        = PLAYER_MAX_HP;
 let playerDead      = false;
+let allDeadTimer    = 0;   // counts up once all players are dead
+let allDeadShowing  = false;
 let timeSinceDamage = 0; // seconds since last hit — regen starts after a delay
 const ZOMBIE_DPS    = 120;  // damage per second while in contact
 const HP_REGEN_RATE = 4;   // hp per second regenerated when not taking damage
@@ -878,6 +880,72 @@ const SLIDING_DOOR_BARRIER = {
 };
 walls.push(SLIDING_DOOR_BARRIER);
 
+// ─── final room (above the extension, reached through the sliding door) ───────
+const FINAL_ROOM = (() => {
+    const e = EXTENSION, t = e.t;
+    const intH    = 240;
+    const outerTop = e.outerTop - intH - t;
+    return {
+        outerL: e.outerL, outerR: e.outerR,
+        outerTop, outerBot: e.outerTop,
+        t, intH, intW: e.intW,
+    };
+})();
+
+const ESCAPE_CAR = (() => {
+    const fr = FINAL_ROOM, t = fr.t;
+    const cx = (fr.outerL + fr.outerR) / 2;
+    return { x: cx - 65, y: fr.outerTop + t + 100, w: 130, h: 64, isFurniture: true };
+})();
+
+const GARAGE_DOOR_Y = ESCAPE_CAR.y - 8;
+const GARAGE_DOOR_H = ESCAPE_CAR.h + 16;
+const GARAGE_DOOR_BARRIER = {
+    x: FINAL_ROOM.outerL, y: GARAGE_DOOR_Y,
+    w: FINAL_ROOM.t,      h: GARAGE_DOOR_H,
+    isGarageDoor: true,
+};
+
+const garageWindows = (() => {
+    const fr = FINAL_ROOM, t = fr.t;
+    const totalW = fr.outerR - fr.outerL;
+    const win1X  = fr.outerL + totalW / 3       - WINDOW_GAP / 2;
+    const win2X  = fr.outerL + totalW * 2 / 3   - WINDOW_GAP / 2;
+    const winRY  = fr.outerTop + t + fr.intH / 2 - WINDOW_GAP / 2;
+    return [
+        new GameWindow(win1X,        fr.outerTop, WINDOW_GAP, t, 'top'),   // top-left window
+        new GameWindow(win2X,        fr.outerTop, WINDOW_GAP, t, 'top'),   // top-right window
+        new GameWindow(fr.outerR - t, winRY,      t, WINDOW_GAP, 'right'), // right window
+    ];
+})();
+
+const garageWalls = (() => {
+    const fr = FINAL_ROOM, t = fr.t;
+    const [wT1, wT2, wR] = garageWindows;
+    return [
+        // top wall — 3 segments split around the 2 windows
+        { x: fr.outerL,          y: fr.outerTop, w: wT1.x - fr.outerL,               h: t },
+        { x: wT1.x + WINDOW_GAP, y: fr.outerTop, w: wT2.x - (wT1.x + WINDOW_GAP),   h: t },
+        { x: wT2.x + WINDOW_GAP, y: fr.outerTop, w: fr.outerR - (wT2.x + WINDOW_GAP), h: t },
+        // right wall — 2 segments split around the window
+        { x: fr.outerR - t, y: fr.outerTop,           w: t, h: wR.y - fr.outerTop              },
+        { x: fr.outerR - t, y: wR.y + WINDOW_GAP,     w: t, h: (fr.outerTop + fr.intH + t) - (wR.y + WINDOW_GAP) },
+    ];
+})();
+
+(() => {
+    const fr = FINAL_ROOM, t = fr.t;
+    const gdT = GARAGE_DOOR_Y, gdB = GARAGE_DOOR_Y + GARAGE_DOOR_H;
+    walls.push(
+        // left wall split around garage door gap
+        { x: fr.outerL, y: fr.outerTop, w: t, h: gdT - fr.outerTop }, // left-top
+        { x: fr.outerL, y: gdB,         w: t, h: fr.outerBot - gdB }, // left-bottom
+        ...garageWalls,
+        ESCAPE_CAR,
+        GARAGE_DOOR_BARRIER,
+    );
+})();
+
 // Carve the door gap out of the main building's bottom wall.
 // buildWalls() created a segment to the right of the bottom window — split it.
 (() => {
@@ -1049,6 +1117,7 @@ const GEN_ROOM_BARRIER = (() => {
 })();
 walls.push(GEN_ROOM_BARRIER);
 windows.push(...genRoomWindows);
+windows.push(...garageWindows);
 
 // ─── indoor furniture (block walking, bullets, and zombie vision) ─────────────
 const FURNITURE = (() => {
@@ -1114,12 +1183,22 @@ const GEN_ROOM = (() => {
 })();
 walls.push(GEN_ROOM.generator, ...GEN_ROOM.fuelBarrels, GEN_ROOM.workbench);
 
-let powerOn       = false;
-let powerLeverT   = 0;     // 0=off lever-down, 1=on lever-up (animated)
-let fPrevHeld     = false; // edge-detect for power switch tap
-let turretCooldown = 0;
-let turretAngle    = 0;    // current drawn barrel angle (smoothly rotated)
-let turretTargetAngle = 0; // desired barrel angle toward target
+let powerOn        = false;
+let powerLeverT    = 0;     // 0=off lever-down, 1=on lever-up (animated)
+let fPrevHeld      = false; // edge-detect for power switch tap
+let slidingDoorOpen = false;
+let turretCooldown  = 0;
+let turretAngle     = 0;    // current drawn barrel angle (smoothly rotated)
+let turretTargetAngle = 0;  // desired barrel angle toward target
+
+let carRepairStage    = 0;     // 0..5 (5 = fully repaired / won)
+let carRepairProgress = 0;     // 0..1 within the current stage
+let gameWon           = false;
+let winPhase          = 0;     // 0=none 1=car animating out 2=message+countdown
+let carAnimX          = 0;     // car visual X during win animation
+let winMessageTimer   = 0;     // countdown after car exits before reload
+let winLockedCamX     = 0;     // camera X locked when car exits
+let winLockedCamY     = 0;
 
 let extraRoomUnlocked = false;
 let doorProgress      = 0; // 0..1 buy-progress
@@ -1303,6 +1382,11 @@ const NAV_WAYPOINTS = (() => {
         { x: e.outerL + t + R, y: e.outerTop + t + R }, // extension top-left corner
         { x: e.outerR - t - R, y: e.outerTop + t + R }, // extension top-right corner
         { x: (e.outerL + e.outerR) / 2, y: e.outerTop + t + R }, // extension top-centre
+        // ── final room (above extension) ──
+        { x: (FINAL_ROOM.outerL + FINAL_ROOM.outerR) / 2, y: FINAL_ROOM.outerBot - R     }, // door approach from inside final room
+        { x: FINAL_ROOM.outerL + t + R,                   y: FINAL_ROOM.outerTop + t + R }, // final room top-left
+        { x: FINAL_ROOM.outerR - t - R,                   y: FINAL_ROOM.outerTop + t + R }, // final room top-right
+        { x: (FINAL_ROOM.outerL + FINAL_ROOM.outerR) / 2, y: FINAL_ROOM.outerTop + t + R }, // final room top-centre
         // ── east wing: vertical corridor, horizontal corridor, new room ──
         { x: (EAST_WING.vL + EAST_WING.vR) / 2, y: EAST_WING.vTop + R    }, // top of vertical (junction)
         { x: (EAST_WING.vL + EAST_WING.vR) / 2, y: EAST_WING.vBot - R    }, // bottom of vertical (end room entry)
@@ -1486,6 +1570,7 @@ function setupConnection() {
         } else if (data.type === 'deathMark') {
             if (data.markType === 'blood') spawnBloodSmear(data.x, data.y);
             else if (data.markType === 'scorch') spawnScorchMark(data.x, data.y);
+            else if (data.markType === 'burn') spawnBurnMark(data.x, data.y);
         } else if (data.type === 'ammoDrop') {
             ammoDrops.push({ id: data.id, x: data.x, y: data.y, life: 15, anim: 0 });
         } else if (data.type === 'pickupAmmoDrop') {
@@ -1899,16 +1984,6 @@ const DEAGLE_PICKUP = (() => {
 
 let deagleBuyProgress = 0; // 0..1 while holding F near pickup
 
-// ─── blaster wall pickup ──────────────────────────────────────────────────────
-// left wall of the generator room, below the door gap
-const BLASTER_PICKUP = (() => {
-    const { roomL, hBot, roomB, t } = EAST_WING;
-    const midY = (hBot + roomB) / 2;
-    return { x: roomL - t, y: midY - 18, w: t, h: 36 };
-})();
-
-let blasterBuyProgress = 0;
-
 // ─── mystery box ──────────────────────────────────────────────────────────────
 const MYSTERY_BOX = (() => {
     const b = BUILDING, t = b.wallThickness;
@@ -1995,12 +2070,13 @@ function updateMysteryBox(dt) {
             if (money < mb.cost) return;
             money -= mb.cost;
             const roll = Math.random();
-            // 5% ray gun | 5% railgun | 15% shotgun | 30% machine gun | 15% uzi | 30% teddy bear
+            // 5% ray gun | 5% railgun | 10% shotgun | 30% machine gun | 10% uzi | 10% blaster | 30% teddy bear
             const prize = roll < 0.05 ? 2
                         : roll < 0.10 ? 5
-                        : roll < 0.25 ? 1
-                        : roll < 0.55 ? 3
-                        : roll < 0.70 ? 4
+                        : roll < 0.20 ? 1
+                        : roll < 0.50 ? 3
+                        : roll < 0.60 ? 4
+                        : roll < 0.70 ? 7
                         : -1; // teddy bear
             if (prize !== -1) {
                 let targetSlot = inventory.indexOf(-1);
@@ -2010,7 +2086,7 @@ function updateMysteryBox(dt) {
                 reserveAmmo[targetSlot] = WEAPON_DEFS[prize].reserve;
                 if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[prize].magSize; reloading = false; reloadTimer = 0; }
                 switchWeapon(targetSlot);
-                const labels = { 1: ['SHOTGUN!', '#e8c020'], 2: ['RAY GUN!', '#40ff60'], 3: ['MACHINE GUN!', '#e8c020'], 4: ['UZI!', '#40c8ff'], 5: ['RAILGUN!', '#a0d8ff'] };
+                const labels = { 1: ['SHOTGUN!', '#e8c020'], 2: ['RAY GUN!', '#40ff60'], 3: ['MACHINE GUN!', '#e8c020'], 4: ['UZI!', '#40c8ff'], 5: ['RAILGUN!', '#a0d8ff'], 7: ['BLASTER!', '#ff4444'] };
                 const [text, color] = labels[prize];
                 mysteryBoxResult = { text, color, timer: 2.5 };
             } else {
@@ -2124,8 +2200,84 @@ function updatePowerSwitch(dt) {
     // rising-edge tap — turn power on (one-way, cannot be switched off)
     if (holding && !fPrevHeld && dist < BARRICADE_RANGE && !powerOn) {
         powerOn = true;
+        // open the sliding door — remove barrier from collision walls
+        const idx = walls.indexOf(SLIDING_DOOR_BARRIER);
+        if (idx !== -1) walls.splice(idx, 1);
+        slidingDoorOpen = true;
     }
     fPrevHeld = holding;
+}
+
+const CAR_REPAIR_STAGES  = 5;
+const CAR_REPAIR_STAGE_T = 3.0; // seconds per stage
+
+function updateCarRepair(dt) {
+    if (gameWon || !slidingDoorOpen) return;
+    const car = ESCAPE_CAR;
+    const cx  = car.x + car.w / 2;
+    const cy  = car.y + car.h / 2;
+    const dist = Math.hypot(player.x - cx, player.y - cy);
+    const holding = isHoldingF();
+
+    const CAR_REPAIR_COST = 500;
+    if (carRepairStage < CAR_REPAIR_STAGES && dist < BARRICADE_RANGE + 20 && holding && money >= CAR_REPAIR_COST) {
+        carRepairProgress += dt / CAR_REPAIR_STAGE_T;
+        if (carRepairProgress >= 1) {
+            carRepairProgress = 0;
+            money -= CAR_REPAIR_COST;
+            carRepairStage++;
+            if (carRepairStage >= CAR_REPAIR_STAGES) {
+                gameWon  = true;
+                winPhase = 1;
+                carAnimX = ESCAPE_CAR.x;
+                const idx = walls.indexOf(GARAGE_DOOR_BARRIER);
+                if (idx !== -1) walls.splice(idx, 1);
+            }
+        }
+    } else {
+        carRepairProgress = Math.max(0, carRepairProgress - dt * 2);
+    }
+}
+
+const CAR_EXIT_SPEED = 90; // px/s
+
+function updateWinSequence(dt) {
+    if (winPhase === 0) return;
+
+    if (winPhase === 1) {
+        // move car left out of the garage
+        carAnimX -= CAR_EXIT_SPEED * dt;
+
+        // follow car with camera
+        const zoom = isMobile ? MOBILE_ZOOM : 1;
+        const cx = carAnimX + ESCAPE_CAR.w / 2;
+        const cy = ESCAPE_CAR.y + ESCAPE_CAR.h / 2;
+        camera.x = Math.max(0, Math.min(cx - canvas.width / (2 * zoom),  WORLD_W - canvas.width  / zoom));
+        camera.y = Math.max(0, Math.min(cy - canvas.height / (2 * zoom), WORLD_H - canvas.height / zoom));
+
+        // car fully outside the building — lock camera, start message countdown
+        if (carAnimX + ESCAPE_CAR.w < FINAL_ROOM.outerL - 20) {
+            winPhase        = 2;
+            winLockedCamX   = camera.x;
+            winLockedCamY   = camera.y;
+            winMessageTimer = 4.0;
+        }
+        return;
+    }
+
+    if (winPhase === 2) {
+        // car keeps driving off into the distance
+        carAnimX -= CAR_EXIT_SPEED * dt;
+        // keep camera locked
+        camera.x = winLockedCamX;
+        camera.y = winLockedCamY;
+        winMessageTimer -= dt;
+        if (winMessageTimer <= 0) {
+            winPhase = 3;
+            // return to main menu
+            location.reload();
+        }
+    }
 }
 
 function updateTurret(dt) {
@@ -2419,29 +2571,6 @@ function updateWeaponPickup(dt) {
         }
     }
 
-    // ── blaster ──
-    {
-        const bp  = BLASTER_PICKUP;
-        const cx  = bp.x + bp.w / 2, cy = bp.y + bp.h / 2;
-        const near = Math.hypot(player.x - cx, player.y - cy) < BARRICADE_RANGE;
-        if (near && holding && !inventory.includes(7)) {
-            blasterBuyProgress = Math.min(1, blasterBuyProgress + dt / 1.5);
-            if (blasterBuyProgress >= 1) {
-                blasterBuyProgress = 0;
-                if (money < WEAPON_DEFS[7].cost) return;
-                money -= WEAPON_DEFS[7].cost;
-                let targetSlot = inventory.indexOf(-1);
-                if (targetSlot === -1) targetSlot = currentWeapon;
-                inventory[targetSlot]   = 7;
-                savedAmmo[targetSlot]   = WEAPON_DEFS[7].magSize;
-                reserveAmmo[targetSlot] = WEAPON_DEFS[7].reserve;
-                if (targetSlot === currentWeapon) { magAmmo = WEAPON_DEFS[7].magSize; reloading = false; reloadTimer = 0; }
-                switchWeapon(targetSlot);
-            }
-        } else {
-            blasterBuyProgress = Math.max(0, blasterBuyProgress - dt * 3);
-        }
-    }
 }
 
 // outDir: angle in radians pointing away from the building (toward the zombie)
@@ -2493,6 +2622,12 @@ function spawnScorchMark(x, y) {
     groundMarks.push({ type: 'scorch', x, y, r, life, maxLife: life });
 }
 
+function spawnBurnMark(x, y) {
+    const r    = 20 + Math.random() * 10;
+    const life = 4.0 + Math.random() * 1.5; // short intense burn then fades
+    groundMarks.push({ type: 'burn', x, y, r, life, maxLife: life });
+}
+
 function updatePlankDebris(dt) {
     for (let i = plankDebris.length - 1; i >= 0; i--) {
         const d = plankDebris[i];
@@ -2537,6 +2672,24 @@ function drawGroundMarks() {
                 ctx.fill();
                 ctx.restore();
             }
+        } else if (m.type === 'burn') {
+            // burn — starts orange/fire, transitions to dark scorch as it fades
+            const fireFrac = Math.min(1, t * 2.5); // fire glow only in first ~40% of life
+            if (fireFrac > 0) {
+                const fire = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r * 0.7);
+                fire.addColorStop(0,   `rgba(255,220,60,${fireFrac * 0.95})`);
+                fire.addColorStop(0.4, `rgba(255,100,10,${fireFrac * 0.8})`);
+                fire.addColorStop(1,   'rgba(0,0,0,0)');
+                ctx.fillStyle = fire;
+                ctx.beginPath(); ctx.arc(m.x, m.y, m.r * 0.7, 0, Math.PI * 2); ctx.fill();
+            }
+            // dark scorch underneath, persists longer
+            const scorch = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
+            scorch.addColorStop(0,   `rgba(6,4,1,0.95)`);
+            scorch.addColorStop(0.5, `rgba(12,8,3,0.7)`);
+            scorch.addColorStop(1,   'rgba(0,0,0,0)');
+            ctx.fillStyle = scorch;
+            ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
         } else {
             // scorch — dark radial gradient
             const grad = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
@@ -2679,15 +2832,21 @@ function updateBullets(dt) {
                         bulletDead = true; break;
                     }
                     const deagleDmg = b.isCrit ? (z.isBoss ? 6 : 100) : 3;
-                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? deagleDmg : b.weaponId === 7 ? 3 : b.weaponId === 3 ? 2 : 1;
+                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? deagleDmg : b.weaponId === 7 ? 6 : b.weaponId === 3 ? 2 : 1;
                     z.hp -= dmg;
                     if (z.hp <= 0) {
                         const zx = z.x, zy = z.y;
                         zombies.splice(j, 1);
                         money += ZOMBIE_KILL_REWARD;
-                        spawnBloodSmear(zx, zy);
+                        if (b.weaponId === 7) {
+                            spawnBurnMark(zx, zy);
+                            spawnParticles(zx, zy, '#ff8800', 20, Math.random() * Math.PI * 2);
+                            spawnParticles(zx, zy, '#ffdd00', 10, Math.random() * Math.PI * 2);
+                        } else {
+                            spawnBloodSmear(zx, zy);
+                        }
                         trySpawnAmmoDrop(zx, zy);
-                        if (conn && conn.open) conn.send({ type: 'deathMark', markType: 'blood', x: zx, y: zy });
+                        if (conn && conn.open) conn.send({ type: 'deathMark', markType: b.weaponId === 7 ? 'burn' : 'blood', x: zx, y: zy });
                     } else {
                         const ba = Math.atan2(b.vy, b.vx);
                         const kbForce = b.weaponId === 6 ? (b.isCrit ? 600 : 420) : 260;
@@ -2695,6 +2854,7 @@ function updateBullets(dt) {
                         z.kbVy += Math.sin(ba) * kbForce;
                     }
                     if (b.isCrit) { spawnCritExplosion(b.x, b.y); critTexts.push({ x: b.x, y: b.y, timer: 0.7 }); }
+                    else if (b.weaponId === 7) spawnParticles(b.x, b.y, '#ff6600', 8, Math.atan2(b.vy, b.vx) + Math.PI);
                     else spawnParticles(b.x, b.y, '#cc2020', b.weaponId === 6 ? 18 : 8, Math.atan2(b.vy, b.vx) + Math.PI);
                     zombieHit = true;
                     if (b.pierceLeft > 0) { b.pierceLeft--; }
@@ -2707,7 +2867,7 @@ function updateBullets(dt) {
                 const dx = b.x - z.x, dy = b.y - z.y;
                 if (dx * dx + dy * dy < (z.radius ?? ZOMBIE_RADIUS) * (z.radius ?? ZOMBIE_RADIUS)) {
                     if (b.weaponId === 2) { spawnRaygunExplosion(b.x, b.y); bulletDead = true; break; }
-                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? (b.isCrit ? 100 : 3) : b.weaponId === 7 ? 3 : b.weaponId === 3 ? 2 : 1;
+                    const dmg = b.weaponId === 5 ? 20 : b.weaponId === 6 ? (b.isCrit ? 100 : 3) : b.weaponId === 7 ? 6 : b.weaponId === 3 ? 2 : 1;
                     if (conn && conn.open) conn.send({ type: 'zombieHit', id: z.id, damage: dmg, angle: Math.atan2(b.vy, b.vx) });
                     if (b.isCrit) { spawnCritExplosion(b.x, b.y); critTexts.push({ x: b.x, y: b.y, timer: 0.7 }); }
                     else spawnParticles(b.x, b.y, '#cc2020', b.weaponId === 6 ? 18 : 8, Math.atan2(b.vy, b.vx) + Math.PI);
@@ -2774,6 +2934,7 @@ function spawnBoss() {
         if (extraRoomWindows.includes(w)) return extraRoomUnlocked;
         if (w === sideRoomWindow)         return sideRoomUnlocked;
         if (genRoomWindows.includes(w))   return genRoomUnlocked;
+        if (garageWindows.includes(w))    return powerOn;
         return true;
     });
 
@@ -2808,6 +2969,7 @@ function spawnZombie() {
         if (extraRoomWindows.includes(w)) return extraRoomUnlocked;
         if (w === sideRoomWindow)         return sideRoomUnlocked;
         if (genRoomWindows.includes(w))   return genRoomUnlocked;
+        if (garageWindows.includes(w))    return powerOn;
         return true;
     });
 
@@ -3302,6 +3464,320 @@ function drawGenRoom() {
     ctx.restore();
 }
 
+function drawFinalRoom() {
+    const fr = FINAL_ROOM, t = fr.t;
+    const car = ESCAPE_CAR;
+
+    // floor — same colour as other rooms
+    ctx.fillStyle = '#202020';
+    ctx.fillRect(fr.outerL + t, fr.outerTop + t, fr.intW, fr.intH);
+
+    // ── garage door ───────────────────────────────────────────────────────────
+    {
+        const gx = fr.outerL, gy = GARAGE_DOOR_Y, gw = t, gh = GARAGE_DOOR_H;
+        if (!gameWon) {
+            // door frame
+            ctx.fillStyle = '#1a1a22';
+            ctx.fillRect(gx - 2, gy - 2, gw + 4, gh + 4);
+            // horizontal panels
+            ctx.fillStyle = '#3a3a4a';
+            const panelH = 12;
+            for (let py = gy; py < gy + gh; py += panelH) {
+                const h = Math.min(panelH - 1, gy + gh - py);
+                ctx.fillRect(gx, py, gw, h);
+            }
+            // panel grooves
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let py = gy + panelH; py < gy + gh; py += panelH) {
+                ctx.beginPath(); ctx.moveTo(gx, py); ctx.lineTo(gx + gw, py); ctx.stroke();
+            }
+            // LED indicator — red (locked), green (repairing)
+            const ledColor = carRepairStage > 0 ? '#ffaa00' : '#ff3333';
+            ctx.fillStyle = ledColor;
+            ctx.shadowBlur = 6; ctx.shadowColor = ledColor;
+            ctx.beginPath(); ctx.arc(gx + gw / 2, gy - 6, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+        // when open: just the frame remains, door retracted upward (not drawn)
+    }
+
+    // ── room props ────────────────────────────────────────────────────────────
+    const iL = fr.outerL + t + 6;  // interior left edge + padding
+    const iR = fr.outerR - t - 6;  // interior right edge - padding
+    const iT = fr.outerTop + t + 6; // interior top edge + padding
+    const iB = fr.outerBot - 6;     // interior bottom edge - padding
+
+    // helper: draw a tyre (top-down circle)
+    function drawTyre(x, y, r) {
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#2a2a2a';
+        ctx.beginPath(); ctx.arc(x, y, r * 0.5, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // tyre stacks — top-left corner (3 tyres)
+    drawTyre(iL + 10, iT + 10, 10);
+    drawTyre(iL + 24, iT + 10, 10);
+    drawTyre(iL + 10, iT + 24, 10);
+
+    // tyre stack — top-right corner (2 tyres)
+    drawTyre(iR - 10, iT + 10, 10);
+    drawTyre(iR - 24, iT + 10, 10);
+
+    // tyre — bottom-right corner (single)
+    drawTyre(iR - 10, iB - 10, 10);
+
+    // toolbox — left wall, mid-height
+    const tbX = iL, tbY = iT + 60;
+    ctx.fillStyle = '#8a3a10'; // red metal box
+    ctx.fillRect(tbX, tbY, 22, 14);
+    ctx.fillStyle = '#6a2a08';
+    ctx.fillRect(tbX, tbY + 5, 22, 4); // drawer divide
+    ctx.fillStyle = '#bbb'; // drawer handles
+    ctx.fillRect(tbX + 4, tbY + 2, 6, 2);
+    ctx.fillRect(tbX + 4, tbY + 7, 6, 2);
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+    ctx.strokeRect(tbX, tbY, 22, 14);
+
+    // oil drum — bottom-left corner
+    const drumX = iL + 4, drumY = iB - 18;
+    ctx.fillStyle = '#2a4a2a';
+    ctx.beginPath(); ctx.ellipse(drumX + 8, drumY + 8, 8, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1a3a1a'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(drumX + 8, drumY + 8, 8, 10, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#3a6a3a'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(drumX + 8, drumY + 8, 8, 4, 0, 0, Math.PI * 2); ctx.stroke(); // band
+
+    // car jack — right wall, mid-height
+    const jkX = iR - 18, jkY = iT + 60;
+    ctx.fillStyle = '#555';
+    ctx.fillRect(jkX, jkY, 18, 10);
+    ctx.fillStyle = '#777';
+    ctx.fillRect(jkX + 4, jkY - 6, 10, 6); // upright
+    ctx.fillRect(jkX + 2, jkY + 10, 14, 4); // base
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+    ctx.strokeRect(jkX, jkY, 18, 10);
+
+    // wrench on the floor near the car
+    const wrX = car.x - 18, wrY = car.y + car.h / 2 - 2;
+    ctx.strokeStyle = '#666'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(wrX, wrY); ctx.lineTo(wrX + 14, wrY); ctx.stroke();
+    ctx.strokeStyle = '#666'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(wrX, wrY); ctx.lineTo(wrX + 4, wrY); ctx.stroke();
+    ctx.strokeStyle = '#666'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(wrX + 10, wrY); ctx.lineTo(wrX + 14, wrY); ctx.stroke();
+
+    const drawCarX = winPhase >= 1 ? carAnimX : car.x;
+    const cx  = drawCarX + car.w / 2;
+    const repairFrac = (carRepairStage + (gameWon ? 1 : carRepairProgress)) / CAR_REPAIR_STAGES;
+
+    // body colour: rusted dark brown → painted blue
+    const bR  = Math.round(90  + (20  - 90)  * repairFrac);
+    const bG  = Math.round(45  + (80  - 45)  * repairFrac);
+    const bB  = Math.round(20  + (180 - 20)  * repairFrac);
+    const bodyColor = `rgb(${bR},${bG},${bB})`;
+    const darkBody  = `rgb(${bR-15},${bG-8},${bB-5})`;
+
+    const dx = drawCarX; // alias for brevity
+
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(dx + 5, car.y + 5, car.w, car.h);
+
+    // ── main body ────────────────────────────────────────────────────────────
+    // hood (front ~28px)
+    ctx.fillStyle = darkBody;
+    ctx.fillRect(dx, car.y, 28, car.h);
+    // engine machinery visible until repaired
+    if (repairFrac < 0.6) {
+        ctx.fillStyle = '#1a1a1a'; // engine block
+        ctx.fillRect(dx + 4, car.y + 8, 18, car.h - 16);
+        ctx.fillStyle = '#555';   // cylinders
+        ctx.fillRect(dx + 6, car.y + 10, 6, 5);
+        ctx.fillRect(dx + 14, car.y + 10, 6, 5);
+        ctx.fillRect(dx + 6, car.y + car.h - 15, 6, 5);
+        ctx.fillRect(dx + 14, car.y + car.h - 15, 6, 5);
+        ctx.fillStyle = '#888';   // hoses
+        ctx.fillRect(dx + 5, car.y + 17, 16, 2);
+        ctx.fillRect(dx + 5, car.y + car.h - 19, 16, 2);
+    }
+    // trunk (rear ~22px)
+    ctx.fillStyle = darkBody;
+    ctx.fillRect(dx + car.w - 22, car.y, 22, car.h);
+    // cabin middle
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(dx + 28, car.y, car.w - 50, car.h);
+
+    // front bumper strip
+    ctx.fillStyle = repairFrac >= 0.3 ? '#aaa' : '#555';
+    ctx.fillRect(dx, car.y + 4, 4, car.h - 8);
+    // rear bumper strip
+    ctx.fillRect(dx + car.w - 4, car.y + 4, 4, car.h - 8);
+
+    // ── front windshield ─────────────────────────────────────────────────────
+    const glassColor = repairFrac >= 0.4 ? '#4a8aaa' : '#1e1e1e';
+    ctx.fillStyle = glassColor;
+    ctx.beginPath();
+    ctx.moveTo(dx + 28, car.y + 7);
+    ctx.lineTo(dx + 44, car.y + 5);
+    ctx.lineTo(dx + 44, car.y + car.h - 5);
+    ctx.lineTo(dx + 28, car.y + car.h - 7);
+    ctx.closePath();
+    ctx.fill();
+    // windshield glare
+    if (repairFrac >= 0.4) {
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.beginPath();
+        ctx.moveTo(dx + 30, car.y + 8);
+        ctx.lineTo(dx + 40, car.y + 6);
+        ctx.lineTo(dx + 40, car.y + 18);
+        ctx.lineTo(dx + 30, car.y + 20);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // ── rear windshield ──────────────────────────────────────────────────────
+    ctx.fillStyle = repairFrac >= 0.4 ? '#3a7090' : '#1a1a1a';
+    ctx.beginPath();
+    ctx.moveTo(dx + car.w - 22, car.y + 8);
+    ctx.lineTo(dx + car.w - 38, car.y + 6);
+    ctx.lineTo(dx + car.w - 38, car.y + car.h - 6);
+    ctx.lineTo(dx + car.w - 22, car.y + car.h - 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── cabin roof (slightly lighter panel) ──────────────────────────────────
+    ctx.fillStyle = `rgb(${bR+12},${bG+6},${bB+8})`;
+    ctx.fillRect(dx + 44, car.y + 5, car.w - 82, car.h - 10);
+
+    // cabin centre-line
+    ctx.strokeStyle = `rgb(${bR-5},${bG-3},${bB-3})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, car.y + 5); ctx.lineTo(cx, car.y + car.h - 5); ctx.stroke();
+
+    // ── side mirrors (near front, protrude from top/bottom) ──────────────────
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(dx + 30, car.y - 8, 12, 5);  // top mirror
+    ctx.fillRect(dx + 30, car.y + car.h + 3, 12, 5); // bottom mirror
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(dx + 30, car.y - 8, 12, 5);
+    ctx.strokeRect(dx + 30, car.y + car.h + 3, 12, 5);
+
+    // ── exhaust pipes (rear, bottom side) ────────────────────────────────────
+    const exhaustColor = repairFrac >= 0.6 ? '#999' : '#3a3a3a';
+    ctx.fillStyle = exhaustColor;
+    ctx.beginPath(); ctx.arc(dx + car.w - 2, car.y + car.h - 10, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(dx + car.w - 2, car.y + car.h - 18, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.arc(dx + car.w - 2, car.y + car.h - 10, 3, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(dx + car.w - 2, car.y + car.h - 18, 3, 0, Math.PI * 2); ctx.stroke();
+
+    // exhaust smoke puff when driving out
+    if (winPhase === 1) {
+        ctx.fillStyle = 'rgba(200,200,200,0.5)';
+        ctx.beginPath(); ctx.arc(dx + car.w + 8, car.y + car.h - 14, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(dx + car.w + 16, car.y + car.h - 16, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ── body outline ─────────────────────────────────────────────────────────
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(dx, car.y, car.w, car.h);
+
+    // ── repair glow when near completion ─────────────────────────────────────
+    if (repairFrac > 0.4 && winPhase === 0) {
+        ctx.save();
+        ctx.shadowBlur = 14 * repairFrac;
+        ctx.shadowColor = '#40aaff';
+        ctx.strokeStyle = `rgba(64,170,255,${repairFrac * 0.55})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(dx - 3, car.y - 3, car.w + 6, car.h + 6);
+        ctx.restore();
+    }
+
+    // ── repair progress bar ───────────────────────────────────────────────────
+    if (!gameWon && carRepairStage < CAR_REPAIR_STAGES && carRepairProgress > 0) {
+        const barW = 90, barH = 6;
+        const bx = cx - barW / 2, by = car.y - 18;
+        ctx.fillStyle = '#111';
+        ctx.fillRect(bx, by, barW, barH);
+        ctx.fillStyle = '#40aaff';
+        ctx.fillRect(bx, by, barW * carRepairProgress, barH);
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx, by, barW, barH);
+        ctx.fillStyle = '#aaa';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${carRepairStage}/${CAR_REPAIR_STAGES}`, cx, by - 3);
+    }
+}
+
+const ALL_DEAD_DELAY = 5.0; // seconds before returning to menu
+
+function updateAllDead(dt) {
+    if (gameWon || winPhase > 0) return;
+    const allDead = playerDead && (!remotePeer || remotePeer.dead);
+    if (allDead) {
+        allDeadShowing = true;
+        allDeadTimer += dt;
+        if (allDeadTimer >= ALL_DEAD_DELAY) location.reload();
+    } else {
+        allDeadTimer   = 0;
+        allDeadShowing = false;
+    }
+}
+
+function drawDeathScreen() {
+    if (!allDeadShowing) return;
+    const fade = Math.min(1, allDeadTimer / 0.8);
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.shadowBlur = 25;
+    ctx.shadowColor = '#cc2020';
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 64px monospace';
+    ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 30);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#aaa';
+    ctx.font = '22px monospace';
+    ctx.fillText(`Survived to wave ${wave}`, canvas.width / 2, canvas.height / 2 + 30);
+    ctx.fillStyle = '#666';
+    ctx.font = '15px monospace';
+    ctx.fillText(`Returning to menu in ${Math.ceil(ALL_DEAD_DELAY - allDeadTimer)}…`, canvas.width / 2, canvas.height / 2 + 70);
+    ctx.restore();
+}
+
+function drawWinScreen() {
+    if (winPhase !== 2) return;
+    const fade = Math.min(1, (4.0 - winMessageTimer) / 0.6); // fade in over 0.6s
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = '#40ffaa';
+    ctx.fillStyle = '#40ffaa';
+    ctx.font = 'bold 64px monospace';
+    ctx.fillText('YOU ESCAPED!', canvas.width / 2, canvas.height / 2 - 30);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#aaa';
+    ctx.font = '22px monospace';
+    ctx.fillText('You repaired the car and escaped the horde.', canvas.width / 2, canvas.height / 2 + 30);
+    ctx.fillStyle = '#666';
+    ctx.font = '15px monospace';
+    ctx.fillText(`Returning to menu in ${Math.ceil(winMessageTimer)}…`, canvas.width / 2, canvas.height / 2 + 70);
+    ctx.restore();
+}
+
 function drawTurret() {
     const { x, y } = TURRET;
     ctx.save();
@@ -3350,37 +3826,46 @@ function drawSlidingDoor() {
     const t = EXTENSION.t;
     const x = SLIDING_DOOR_X, y = SLIDING_DOOR_Y, w = SLIDING_DOOR_W;
     const mid = x + w / 2;
+    // panels retract fully into the wall segments when open
+    const panelW = w / 2;
 
     ctx.save();
 
-    // door frame — slightly darker inset border
+    // door frame
     ctx.fillStyle = '#1a1a22';
     ctx.fillRect(x - 2, y - 2, w + 4, t + 4);
 
-    // left panel
-    ctx.fillStyle = '#2e2e3e';
-    ctx.fillRect(x, y, w / 2, t);
-    // right panel
-    ctx.fillRect(mid, y, w / 2, t);
+    if (!slidingDoorOpen) {
+        // left panel
+        ctx.fillStyle = '#2e2e3e';
+        ctx.fillRect(x, y, panelW, t);
+        // right panel
+        ctx.fillRect(mid, y, panelW, t);
 
-    // panel highlight lines (horizontal grooves)
-    ctx.strokeStyle = '#3d3d52';
-    ctx.lineWidth = 1;
-    for (let gy = y + 6; gy < y + t - 4; gy += 7) {
-        ctx.beginPath(); ctx.moveTo(x + 2, gy); ctx.lineTo(mid - 2, gy); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(mid + 2, gy); ctx.lineTo(x + w - 2, gy); ctx.stroke();
+        // panel highlight lines
+        ctx.strokeStyle = '#3d3d52';
+        ctx.lineWidth = 1;
+        for (let gy = y + 6; gy < y + t - 4; gy += 7) {
+            ctx.beginPath(); ctx.moveTo(x + 2, gy); ctx.lineTo(mid - 2, gy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(mid + 2, gy); ctx.lineTo(x + w - 2, gy); ctx.stroke();
+        }
+
+        // centre seam
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(mid, y); ctx.lineTo(mid, y + t); ctx.stroke();
+    } else {
+        // panels retracted into the wall — draw as thin slivers at the edges
+        ctx.fillStyle = '#2e2e3e';
+        ctx.fillRect(x - panelW + 4, y, panelW, t);  // left panel slid left
+        ctx.fillRect(mid + panelW - 4, y, panelW, t); // right panel slid right
     }
 
-    // centre seam
-    ctx.strokeStyle = '#111';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(mid, y); ctx.lineTo(mid, y + t); ctx.stroke();
-
-    // power indicator LEDs — red (no power)
+    // power indicator LEDs
     const ledY = y + t / 2;
     ctx.shadowBlur = 6;
-    ctx.shadowColor = '#cc2020';
-    ctx.fillStyle = '#ff4444';
+    ctx.shadowColor = slidingDoorOpen ? '#20cc20' : '#cc2020';
+    ctx.fillStyle   = slidingDoorOpen ? '#44ff44' : '#ff4444';
     ctx.beginPath(); ctx.arc(x + 5, ledY, 2, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(x + w - 5, ledY, 2, 0, Math.PI * 2); ctx.fill();
 
@@ -3404,13 +3889,13 @@ function drawBuilding() {
     // solid wall rects (furniture and custom doors drawn separately)
     ctx.fillStyle = '#2a2a2a';
     for (const wall of walls) {
-        if (wall.isFurniture || wall.isSlidingDoor) continue;
+        if (wall.isFurniture || wall.isSlidingDoor || wall.isGarageDoor) continue;
         ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
     }
     ctx.strokeStyle = '#444';
     ctx.lineWidth = 2;
     for (const wall of walls) {
-        if (wall.isFurniture || wall.isSlidingDoor) continue;
+        if (wall.isFurniture || wall.isSlidingDoor || wall.isGarageDoor) continue;
         ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
     }
 
@@ -3540,6 +4025,7 @@ function drawDeadCharacter(x, y) {
 }
 
 function drawPlayer() {
+    if (winPhase > 0) return;
     if (playerDead) {
         drawDeadCharacter(player.x, player.y);
         drawPlayerName(player.x, player.y, localPlayerName, '#cc2020');
@@ -3550,7 +4036,7 @@ function drawPlayer() {
 }
 
 function drawRemotePlayer() {
-    if (!remotePeer) return;
+    if (!remotePeer || winPhase > 0) return;
     if (remotePeer.dead) {
         drawDeadCharacter(remotePeer.x, remotePeer.y);
         drawPlayerName(remotePeer.x, remotePeer.y, remotePeer.name ?? 'Player', '#cc2020');
@@ -3751,44 +4237,6 @@ function drawWeaponPickup() {
         }
     }
 
-    // ── blaster (generator room left wall, below door gap) ──
-    {
-        const bp = BLASTER_PICKUP;
-        const owned = inventory.includes(7);
-        ctx.fillStyle = '#202020';
-        ctx.fillRect(bp.x, bp.y, bp.w, bp.h);
-        ctx.strokeStyle = '#cc2020';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(bp.x, bp.y, bp.w, bp.h);
-        const cx = bp.x + bp.w / 2, cy = bp.y + bp.h / 2;
-        ctx.save();
-        ctx.globalAlpha = owned ? 0.35 : 1.0;
-        ctx.translate(cx, cy);
-        ctx.rotate(Math.PI / 2);
-        // body
-        ctx.fillStyle = '#3a3a4a'; ctx.fillRect(-8, -3, 9, 8);
-        // power cell
-        ctx.save();
-        ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 6;
-        ctx.fillStyle = '#ff4444';
-        ctx.beginPath(); ctx.arc(-3, 1, 2, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-        // barrel
-        ctx.fillStyle = '#555'; ctx.fillRect(1, -2, 9, 5);
-        // muzzle glow
-        ctx.save();
-        ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 5;
-        ctx.fillStyle = '#ff6060';
-        ctx.beginPath(); ctx.arc(11, 0.5, 1.5, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-        ctx.restore();
-        if (!owned && blasterBuyProgress > 0) {
-            ctx.fillStyle = '#330000';
-            ctx.fillRect(bp.x + bp.w - 3, bp.y, 3, bp.h);
-            ctx.fillStyle = '#ff4444';
-            ctx.fillRect(bp.x + bp.w - 3, bp.y, 3, bp.h * blasterBuyProgress);
-        }
-    }
 }
 
 function drawHudPrompt(text) {
@@ -3911,15 +4359,17 @@ function drawBarricadePrompt() {
         }
     }
 
-    // blaster buy prompt
-    {
-        const bp  = BLASTER_PICKUP;
-        const bcx = bp.x + bp.w / 2, bcy = bp.y + bp.h / 2;
-        if (Math.hypot(player.x - bcx, player.y - bcy) < BARRICADE_RANGE && !inventory.includes(7)) {
-            const canAfford = money >= WEAPON_DEFS[7].cost;
-            drawHudPrompt(canAfford
-                ? `[F] Buy Blaster  £${WEAPON_DEFS[7].cost}`
-                : `Blaster  £${WEAPON_DEFS[7].cost}  (need £${WEAPON_DEFS[7].cost - money} more)`);
+    // car repair prompt
+    if (slidingDoorOpen && !gameWon) {
+        const car = ESCAPE_CAR;
+        const cx  = car.x + car.w / 2, cy = car.y + car.h / 2;
+        if (Math.hypot(player.x - cx, player.y - cy) < BARRICADE_RANGE + 20) {
+            if (carRepairStage < CAR_REPAIR_STAGES) {
+                const canAfford = money >= 500;
+                drawHudPrompt(canAfford
+                    ? `[F] Repair Car  £500  (${carRepairStage}/${CAR_REPAIR_STAGES})`
+                    : `Repair Car  £500  (need £${500 - money} more)  (${carRepairStage}/${CAR_REPAIR_STAGES})`);
+            }
             return;
         }
     }
@@ -4235,10 +4685,13 @@ function gameLoop(timestamp) {
     updateSideRoomDoor(dt);
     updateGenRoomDoor(dt);
     updatePowerSwitch(dt);
+    updateCarRepair(dt);
+    updateWinSequence(dt);
+    updateAllDead(dt);
     updateTurret(dt);
     updateZombies(dt);
     updateJoinerZombieDamage(dt);
-    updateCamera();
+    if (winPhase === 0) updateCamera();
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -4251,6 +4704,7 @@ function gameLoop(timestamp) {
     drawWorldBorder();
     drawBuilding();
     drawSlidingDoor();
+    drawFinalRoom();
     drawExtraRoom();
     drawFurniture();
     drawGenRoom();
@@ -4280,6 +4734,8 @@ function gameLoop(timestamp) {
     drawBarricadePrompt();
     drawMysteryBoxResult();
     drawMobileControls();
+    drawWinScreen();
+    drawDeathScreen();
 
     requestAnimationFrame(gameLoop);
 }
