@@ -568,9 +568,9 @@ class Particle {
 }
 
 let currentWeapon  = 0;                                    // active slot index
-let inventory      = [0, 7, -1];                          // WEAPON_DEFS id per slot; -1 = empty
-let savedAmmo      = [WEAPON_DEFS[0].magSize, WEAPON_DEFS[7].magSize, 0];
-let reserveAmmo    = [Infinity, WEAPON_DEFS[7].reserve, 0];                    // reserve (spare) ammo per slot
+let inventory      = [0, -1, -1];                          // WEAPON_DEFS id per slot; -1 = empty
+let savedAmmo      = [WEAPON_DEFS[0].magSize, 0, 0];
+let reserveAmmo    = [Infinity, 0, 0];                     // reserve (spare) ammo per slot
 let weaponCooldown     = 0;
 let mouseHeld          = false;
 let fireBloom          = 0;   // accumulated extra spread while holding trigger
@@ -613,7 +613,7 @@ let remoteMuzzleFlash = null;
 
 let localPlayerName = 'Player';
 
-let money = 5000; // currency — to be used for future upgrades/purchases
+let money = 0;
 
 // ─── player health ────────────────────────────────────────────────────────────
 
@@ -1527,8 +1527,9 @@ function setupConnection() {
             // joiner receives zombie positions + wave info from host
             remoteZombies = data.zombies;
             const prevWave = wave;
-            wave      = data.wave;
-            waveDelay = data.waveDelay;
+            wave        = data.wave;
+            waveDelay   = data.waveDelay;
+            zombiesLeft = data.zombiesLeft ?? 0;
             if (data.wave > prevWave) {
                 if (playerDead) { playerDead = false; playerHp = PLAYER_MAX_HP; }
             }
@@ -1577,6 +1578,13 @@ function setupConnection() {
             const di = ammoDrops.findIndex(d => d.id === data.id);
             if (di !== -1) ammoDrops.splice(di, 1);
             applyMaxAmmo();
+        } else if (data.type === 'powerOn') {
+            if (!powerOn) {
+                powerOn = true;
+                const idx = walls.indexOf(SLIDING_DOOR_BARRIER);
+                if (idx !== -1) walls.splice(idx, 1);
+                slidingDoorOpen = true;
+            }
         } else if (data.type === 'unlockRoom') {
             if (!extraRoomUnlocked) {
                 extraRoomUnlocked = true;
@@ -2204,6 +2212,7 @@ function updatePowerSwitch(dt) {
         const idx = walls.indexOf(SLIDING_DOOR_BARRIER);
         if (idx !== -1) walls.splice(idx, 1);
         slidingDoorOpen = true;
+        if (conn && conn.open) conn.send({ type: 'powerOn' });
     }
     fPrevHeld = holding;
 }
@@ -3186,6 +3195,7 @@ function updateZombies(dt) {
             type:    'zombies',
             zombies: zombies.map(z => ({ x: z.x, y: z.y, state: z.state, id: z.id, angle: z.angle, isBoss: z.isBoss, hp: z.hp, maxHp: z.maxHp, radius: z.radius })),
             wave,
+            zombiesLeft,
             waveDelay:    waveDelay > 0 ? waveDelay : 0,
             windowPlanks: windows.map(w => w.planks),
         });
@@ -4625,7 +4635,8 @@ function drawWaveHUD() {
     ctx.font      = 'bold 13px monospace';
     ctx.textAlign = 'center';
 
-    if (zombies.length === 0 && zombiesLeft === 0 && wave > 0) {
+    const activeZombies = shouldSimulateZombies() ? zombies.length : remoteZombies.length;
+    if (activeZombies === 0 && zombiesLeft === 0 && wave > 0) {
         // between waves — countdown
         const secs = Math.ceil(waveDelay);
         ctx.fillStyle = '#666';
