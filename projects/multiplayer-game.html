@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Zombie Survival - A browser-based multiplayer top-down zombie survival game built with HTML Canvas and JavaScript">
+    <title>Zombie Survival | James Brown</title>
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="../project-styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="grain-overlay"></div>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <a href="../index.html" class="nav-logo">JB</a>
+            <ul class="nav-menu">
+                <li><a href="../index.html#about" class="nav-link">About</a></li>
+                <li><a href="../index.html#projects" class="nav-link">Projects</a></li>
+                <li><a href="../index.html#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Project Header -->
+    <section class="project-detail-header">
+        <div class="container">
+            <div class="project-header-content">
+                <span class="project-category">Browser Game / Multiplayer / JavaScript</span>
+                <h1 class="project-detail-title">Outbreak: Black Site</h1>
+                <p class="project-tagline">
+                    A top-down co-op zombie survival game playable in the browser with a friend. Board up windows, buy weapons, repair the car, and escape before the waves overwhelm you.
+                </p>
+
+                <div class="project-meta-info">
+                    <div class="meta-item">
+                        <span class="meta-label">Timeline</span>
+                        <span class="meta-value">Ongoing</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Role</span>
+                        <span class="meta-value">Solo Developer</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Status</span>
+                        <span class="meta-value">In Development</span>
+                    </div>
+                </div>
+
+                <div class="project-actions">
+                    <a href="multiplayer-game/index.html" class="btn btn-primary">Play Game</a>
+                    <a href="https://github.com/jamesbrown-dev/jamesbrown-dev.github.io" target="_blank" class="btn btn-secondary">View Code</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Content -->
+    <section class="project-content">
+        <div class="container">
+            <div class="project-main">
+
+                <!-- Overview -->
+                <div class="content-section">
+                    <h2 class="section-heading">Project Overview</h2>
+                    <p class="content-text">
+                        Zombie Survival is a browser-based co-op game for two players. One player hosts and shares their ID, the other joins with no server required. Together you defend a building from escalating zombie waves, managing barricades, ammo, and money while working toward a single goal: repair the car and escape.
+                    </p>
+                    <p class="content-text">
+                        The building has multiple rooms to unlock as you progress, each requiring money and coordination. A mystery box offers powerful weapons at random, a generator room powers a sliding security door, and a final garage holds the car that ends the run when fully repaired.
+                    </p>
+                </div>
+
+                <!-- Tech Stack -->
+                <div class="content-section">
+                    <h2 class="section-heading">Technologies Used</h2>
+                    <div class="tech-stack-grid">
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🎨</div>
+                            <div class="tech-name">HTML Canvas 2D</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">⚡</div>
+                            <div class="tech-name">Vanilla JavaScript</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🌐</div>
+                            <div class="tech-name">PeerJS (WebRTC)</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🧮</div>
+                            <div class="tech-name">2D Vector Maths</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">🎮</div>
+                            <div class="tech-name">Mouse & Keyboard Input</div>
+                        </div>
+                        <div class="tech-stack-item">
+                            <div class="tech-icon">📱</div>
+                            <div class="tech-name">Mobile Touch Controls</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Key Features -->
+                <div class="content-section">
+                    <h2 class="section-heading">Key Features</h2>
+                    <ul class="features-list">
+                        <li><strong>Peer-to-peer Multiplayer:</strong> Two players connect directly via PeerJS with no backend. The host simulates zombies and syncs state to the joiner at 60Hz.</li>
+                        <li><strong>8 Weapons:</strong> Pistol, shotgun, machine gun, UZI, desert eagle, ray gun, railgun, and blaster, each with unique stats, visuals, and behaviour. Most are available through the mystery box.</li>
+                        <li><strong>Barricade System:</strong> Windows around the building can be boarded up with planks. Zombies attack and break through to get inside.</li>
+                        <li><strong>Unlockable Rooms:</strong> Spend money to open new areas of the building including a side room, generator room, east wing, and final garage, each adding new strategic options.</li>
+                        <li><strong>Power Switch:</strong> Activating the generator opens a sliding security door and unlocks windows in the garage, letting zombies approach from a new direction.</li>
+                        <li><strong>Car Repair & Escape:</strong> Repair the car across five stages at £500 each, triggering a cinematic win sequence where the car drives out and the run ends.</li>
+                        <li><strong>Boss Waves:</strong> Every fifth wave spawns a boss zombie with significantly more health, a larger hitbox, and higher damage.</li>
+                        <li><strong>Turret:</strong> An automated turret in the east wing targets and fires at nearby zombies when powered on.</li>
+                    </ul>
+                </div>
+
+                <!-- What I Learned -->
+                <div class="content-section">
+                    <h2 class="section-heading">What I Learned</h2>
+                    <div class="learnings-grid">
+                        <div class="learning-card">
+                            <div class="learning-icon">🌐</div>
+                            <h3 class="learning-title">Peer-to-Peer Networking</h3>
+                            <p class="learning-text">
+                                Implemented a host/joiner architecture over WebRTC using PeerJS. The host owns the simulation and the joiner sends inputs, receives state, and handles visual-only effects locally to stay responsive.
+                            </p>
+                        </div>
+                        <div class="learning-card">
+                            <div class="learning-icon">🔄</div>
+                            <h3 class="learning-title">State Synchronisation</h3>
+                            <p class="learning-text">
+                                Learned how to keep two clients consistent by syncing zombie positions, wave state, barricade health, room unlocks, and game events like kills and pickups without a central server.
+                            </p>
+                        </div>
+                        <div class="learning-card">
+                            <div class="learning-icon">🏗️</div>
+                            <h3 class="learning-title">World & Collision Design</h3>
+                            <p class="learning-text">
+                                Built a rect-based wall system with circle-rectangle collision resolution. Rooms, doors, barricades, and furniture are all defined geometrically and the collision and rendering systems share the same data.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Navigation -->
+    <nav class="project-nav">
+        <div class="container">
+            <div class="back-to-projects">
+                <a href="../index.html#projects">← Back to All Projects</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 James Brown. Built with passion and caffeine ☕</p>
+            <p class="footer-note">
+                <a href="../index.html">← Back to Portfolio</a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="../script.js"></script>
+</body>
+</html>
