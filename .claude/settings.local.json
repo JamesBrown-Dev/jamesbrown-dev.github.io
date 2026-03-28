@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Remove-Item -Path ''c:\\\\Users\\\\james\\\\Documents\\\\Projects\\\\jamesbrown-dev.github.io\\\\projects\\\\future-miners'' -Recurse -Force\")",
+      "Bash(java -version)"
+    ]
+  }
+}
