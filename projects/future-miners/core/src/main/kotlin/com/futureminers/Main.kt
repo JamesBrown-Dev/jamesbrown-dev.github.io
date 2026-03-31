@@ -1,6 +1,7 @@
 package com.futureminers
 
 import box2dLight.ConeLight
+import box2dLight.PointLight
 import box2dLight.RayHandler
 import com.badlogic.gdx.ApplicationAdapter
 import com.badlogic.gdx.Gdx
@@ -25,6 +26,10 @@ class Main : ApplicationAdapter() {
     private lateinit var torch: ConeLight
 
     private val playerSpeed = 5f
+    private lateinit var candleLight: PointLight
+    private val candleX = 8f
+    private val candleY = 8f
+    private var flickerTimer = 0f
 
     // Wall layout: each entry is x, y, width, height in metres
     private val wallLayout = listOf(
@@ -63,8 +68,12 @@ class Main : ApplicationAdapter() {
         circle.dispose()
 
         // Torch cone light attached to player
-        torch = ConeLight(rayHandler, 128, Color(1f, 0.85f, 0.6f, 1f), 10f, 0f, 0f, 90f, 25f)
+        torch = ConeLight(rayHandler, 128, Color(1f, 0.85f, 0.6f, 1f), 16f, 0f, 0f, 90f, 25f)
         torch.isSoft = true
+
+        // Candle
+        candleLight = PointLight(rayHandler, 64, Color(1f, 0.6f, 0.2f, 1f), 5f, candleX, candleY)
+        candleLight.isSoft = true
 
         // Build walls
         wallLayout.forEach { (x, y, w, h) -> createWall(x, y, w, h) }
@@ -102,6 +111,11 @@ class Main : ApplicationAdapter() {
         torch.setPosition(playerBody.position.x, playerBody.position.y)
         torch.setDirection(angle)
 
+        // Candle flicker
+        flickerTimer += dt
+        val flicker = 8f + MathUtils.sin(flickerTimer * 9f) * 1f + MathUtils.random(-0.5f, 0.5f)
+        candleLight.setDistance(flicker)
+
         world.step(dt, 6, 2)
 
         camera.position.set(playerBody.position.x, playerBody.position.y, 0f)
@@ -123,6 +137,25 @@ class Main : ApplicationAdapter() {
         shapeRenderer.color = Color(0.8f, 0.75f, 0.7f, 1f)
         shapeRenderer.circle(playerBody.position.x, playerBody.position.y, 0.3f, 16)
 
+        // Candle — wax stub
+        shapeRenderer.color = Color(0.9f, 0.88f, 0.82f, 1f)
+        shapeRenderer.rect(candleX - 0.1f, candleY - 0.25f, 0.2f, 0.25f)
+
+        // Flame flicker offset
+        val flameOffset = MathUtils.sin(flickerTimer * 13f) * 0.04f
+
+        // Outer flame (orange)
+        shapeRenderer.color = Color(1f, 0.45f, 0.1f, 1f)
+        shapeRenderer.circle(candleX + flameOffset, candleY + 0.13f, 0.13f, 12)
+
+        // Inner flame (yellow)
+        shapeRenderer.color = Color(1f, 0.85f, 0.2f, 1f)
+        shapeRenderer.circle(candleX + flameOffset * 0.5f, candleY + 0.1f, 0.07f, 12)
+
+        // Hot centre (white)
+        shapeRenderer.color = Color(1f, 1f, 0.95f, 1f)
+        shapeRenderer.circle(candleX, candleY + 0.07f, 0.03f, 8)
+
         shapeRenderer.end()
 
         // Lighting
@@ -138,5 +171,6 @@ class Main : ApplicationAdapter() {
         shapeRenderer.dispose()
         rayHandler.dispose()
         world.dispose()
+        candleLight.dispose()
     }
 }
