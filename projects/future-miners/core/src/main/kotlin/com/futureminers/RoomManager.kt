@@ -7,7 +7,7 @@ object RoomManager {
     val startW = 10f
     val startH = 7.5f
     private const val MAX_DEPTH     = 8
-    private const val BRANCH_CHANCE = 0.75f
+    private const val BRANCH_CHANCE = 0.80f
 
     fun generate(): List<RoomData> {
         val rooms    = mutableListOf<RoomData>()
@@ -113,7 +113,7 @@ object RoomManager {
 
     private fun rollExits(skip: WallSide, depth: Int): Set<WallSide> {
         if (depth == 0) return emptySet()
-        val chance = BRANCH_CHANCE * (depth.toFloat() / MAX_DEPTH)
+        val chance = 0.60f + (BRANCH_CHANCE - 0.60f) * depth.toFloat() / MAX_DEPTH
         return WallSide.entries
             .filter { it != skip && MathUtils.randomBoolean(chance) }
             .toSet()
