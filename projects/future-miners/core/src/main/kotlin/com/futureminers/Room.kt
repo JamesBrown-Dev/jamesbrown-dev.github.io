@@ -52,12 +52,12 @@ object RoomBuilder {
         return RoomData(0f, 0f, roomW, roomH, RoomType.SQUARE, walls)
     }
 
-    fun buildSquareRoom(worldX: Float, worldY: Float, entry: WallSide): RoomData =
-        buildRectRoom(worldX, worldY, 8f, 8f, entry, RoomType.SQUARE)
+    fun buildSquareRoom(worldX: Float, worldY: Float, entry: WallSide, exits: Set<WallSide> = emptySet()): RoomData =
+        buildRectRoom(worldX, worldY, 8f, 8f, entry, RoomType.SQUARE, exits)
 
-    fun buildCorridorRoom(worldX: Float, worldY: Float, entry: WallSide): RoomData {
+    fun buildCorridorRoom(worldX: Float, worldY: Float, entry: WallSide, exits: Set<WallSide> = emptySet()): RoomData {
         val (w, h) = dimensions(RoomType.CORRIDOR, entry)
-        return buildRectRoom(worldX, worldY, w, h, entry, RoomType.CORRIDOR)
+        return buildRectRoom(worldX, worldY, w, h, entry, RoomType.CORRIDOR, exits, stub = false)
     }
 
     fun buildCircleRoom(worldX: Float, worldY: Float, entry: WallSide): RoomData {
@@ -114,14 +114,16 @@ object RoomBuilder {
         worldX: Float, worldY: Float,
         w: Float, h: Float,
         entry: WallSide,
-        type: RoomType
+        type: RoomType,
+        exits: Set<WallSide> = emptySet(),
+        stub: Boolean = true
     ): RoomData {
-        val half  = DOOR_W / 2f
+        val half = DOOR_W / 2f
+        val open = exits + entry   // all sides that need a doorway gap
         val walls = mutableListOf<WallSegment>()
 
-        // Stub: the room's local origin is placed flush against the previous room's wall.
-        // Two cap segments run alongside the door opening for CONN_LEN, then the room body begins.
-        when (entry) {
+        // Stub on the entry side (skipped for rooms that are already corridor-shaped)
+        if (stub) when (entry) {
             WallSide.LEFT -> {
                 walls += WallSegment(0f, h / 2f - half - WALL_T, CONN_LEN, WALL_T)
                 walls += WallSegment(0f, h / 2f + half,          CONN_LEN, WALL_T)
@@ -140,26 +142,27 @@ object RoomBuilder {
             }
         }
 
-        // Room body is offset by CONN_LEN on the entry axis
-        val ox = if (entry == WallSide.LEFT)   CONN_LEN else 0f
-        val oy = if (entry == WallSide.BOTTOM) CONN_LEN else 0f
+        // Body offset by CONN_LEN on the entry axis (only when there is a stub)
+        val ox = if (stub && entry == WallSide.LEFT)   CONN_LEN else 0f
+        val oy = if (stub && entry == WallSide.BOTTOM) CONN_LEN else 0f
 
-        if (entry == WallSide.BOTTOM) {
+        // Each wall is split into a doorway if that side is in `open`, otherwise solid
+        if (WallSide.BOTTOM in open) {
             walls += WallSegment(ox,                 oy, w / 2f - half, WALL_T)
             walls += WallSegment(ox + w / 2f + half, oy, w / 2f - half, WALL_T)
         } else walls += WallSegment(ox, oy, w, WALL_T)
 
-        if (entry == WallSide.TOP) {
+        if (WallSide.TOP in open) {
             walls += WallSegment(ox,                 oy + h - WALL_T, w / 2f - half, WALL_T)
             walls += WallSegment(ox + w / 2f + half, oy + h - WALL_T, w / 2f - half, WALL_T)
         } else walls += WallSegment(ox, oy + h - WALL_T, w, WALL_T)
 
-        if (entry == WallSide.LEFT) {
+        if (WallSide.LEFT in open) {
             walls += WallSegment(ox, oy,                  WALL_T, h / 2f - half)
             walls += WallSegment(ox, oy + h / 2f + half,  WALL_T, h / 2f - half)
         } else walls += WallSegment(ox, oy, WALL_T, h)
 
-        if (entry == WallSide.RIGHT) {
+        if (WallSide.RIGHT in open) {
             walls += WallSegment(ox + w - WALL_T, oy,                 WALL_T, h / 2f - half)
             walls += WallSegment(ox + w - WALL_T, oy + h / 2f + half, WALL_T, h / 2f - half)
         } else walls += WallSegment(ox + w - WALL_T, oy, WALL_T, h)
