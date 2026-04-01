@@ -171,7 +171,10 @@ class Main : ApplicationAdapter() {
         val tipX = playerBody.position.x + cosL * 0.55f - sinL * 0.15f
         val tipY = playerBody.position.y + sinL * 0.55f + cosL * 0.15f
 
-        torch.setPosition(tipX, tipY)
+        val lightX = playerBody.position.x + cosL * 0.25f - sinL * 0.15f
+        val lightY = playerBody.position.y + sinL * 0.25f + cosL * 0.15f
+
+        torch.setPosition(lightX, lightY)
         torch.setDirection(torchLagAngle * MathUtils.radiansToDegrees)
 
         // Candle flicker
