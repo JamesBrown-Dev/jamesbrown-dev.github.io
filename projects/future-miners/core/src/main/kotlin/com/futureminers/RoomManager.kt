@@ -74,7 +74,7 @@ object RoomManager {
             }
         }
 
-        rooms += buildRoom(nextWorldX, nextWorldY, nextType, nextEntry, successfulExits)
+        rooms += buildRoom(nextWorldX, nextWorldY, nextType, nextEntry, successfulExits, MAX_DEPTH - depth)
         return true
     }
 
@@ -132,10 +132,10 @@ object RoomManager {
         else -> RoomType.CIRCLE
     }
 
-    private fun buildRoom(worldX: Float, worldY: Float, type: RoomType, entry: WallSide, exits: Set<WallSide>): RoomData =
+    private fun buildRoom(worldX: Float, worldY: Float, type: RoomType, entry: WallSide, exits: Set<WallSide>, depth: Int = 0): RoomData =
         when (type) {
             RoomType.SQUARE   -> RoomBuilder.buildSquareRoom(worldX, worldY, entry, exits)
             RoomType.CORRIDOR -> RoomBuilder.buildCorridorRoom(worldX, worldY, entry, exits)
             RoomType.CIRCLE   -> RoomBuilder.buildCircleRoom(worldX, worldY, entry)
-        }
+        }.copy(depth = depth)
 }

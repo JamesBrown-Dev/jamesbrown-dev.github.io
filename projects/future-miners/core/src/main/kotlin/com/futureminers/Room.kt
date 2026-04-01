@@ -16,8 +16,15 @@ data class RoomData(
     val height: Float,
     val type: RoomType,
     val walls: List<WallSegment>,
-    val circle: CircleWall? = null
+    val circle: CircleWall? = null,
+    val depth: Int = 0,
+    val bodyOffsetX: Float = 0f,
+    val bodyOffsetY: Float = 0f,
+    val openSides: Set<WallSide> = emptySet()
 )
+
+enum class LootType { SILVER, GOLD, DIAMOND }
+data class LootItem(val x: Float, val y: Float, val type: LootType, var collected: Boolean = false)
 
 object RoomBuilder {
 
@@ -167,6 +174,6 @@ object RoomBuilder {
             walls += WallSegment(ox + w - WALL_T, oy + h / 2f + half, WALL_T, h / 2f - half)
         } else walls += WallSegment(ox + w - WALL_T, oy, WALL_T, h)
 
-        return RoomData(worldX, worldY, w, h, type, walls)
+        return RoomData(worldX, worldY, w, h, type, walls, bodyOffsetX = ox, bodyOffsetY = oy, openSides = open)
     }
 }
