@@ -70,6 +70,7 @@ class Main : ApplicationAdapter() {
 
     private data class WallTorchData(val mountX: Float, val mountY: Float, val headX: Float, val headY: Float, val side: WallSide, val flickerOffset: Float, val light: PointLight)
     private val wallTorches = mutableListOf<WallTorchData>()
+    private val spiders     = mutableListOf<Spider>()
 
     override fun create() {
         camera = OrthographicCamera()
@@ -154,6 +155,10 @@ class Main : ApplicationAdapter() {
             }
         }
 
+        // Spiders
+        rooms.filter { it.depth >= 3 && it.type != RoomType.CORRIDOR }
+            .forEach { room -> if (MathUtils.randomBoolean(0.6f)) spiders += Spider(world, rayHandler, room) }
+
         // Player
         playerBody = world.createBody(BodyDef().apply {
             type = BodyDef.BodyType.DynamicBody
@@ -161,7 +166,9 @@ class Main : ApplicationAdapter() {
             fixedRotation = true
         })
         val circle = CircleShape().apply { radius = 0.3f }
-        playerBody.createFixture(circle, 1f)
+        playerBody.createFixture(circle, 1f).also {
+            it.filterData = Filter().apply { categoryBits = 0x0008; maskBits = 0x0001 }
+        }
         circle.dispose()
 
         // Faint innate glow around the player
@@ -292,6 +299,9 @@ class Main : ApplicationAdapter() {
 
         world.step(dt, 6, 2)
 
+        // Spider update
+        spiders.forEach { it.update(dt, playerBody.position) }
+
         // Loot pickup
         val px = playerBody.position.x
         val py = playerBody.position.y
@@ -345,26 +355,19 @@ class Main : ApplicationAdapter() {
             room.walls.forEach { seg ->
                 shapeRenderer.rect(room.worldX + seg.x, room.worldY + seg.y, seg.w, seg.h)
             }
-            // Circle rooms: outer ring + inner void + door cutout
+            // Circle rooms: outer arc (with door gap) + inner void circle
             room.circle?.let { c ->
-                val wx = room.worldX + c.cx
-                val wy = room.worldY + c.cy
+                val wx       = room.worldX + c.cx
+                val wy       = room.worldY + c.cy
+                val outerR   = c.innerRadius + RoomBuilder.WALL_T
+                // Angular half-gap at the outer radius so the opening matches DOOR_W
+                val gapHalf  = MathUtils.asin((RoomBuilder.DOOR_W / 2f) / outerR)
+                val startRad = c.doorAngle + gapHalf
+                val arcDeg   = (MathUtils.PI2 - gapHalf * 2f) * MathUtils.radiansToDegrees
                 shapeRenderer.color = wallColor
-                shapeRenderer.circle(wx, wy, c.innerRadius + RoomBuilder.WALL_T, 64)
+                shapeRenderer.arc(wx, wy, outerR, startRad * MathUtils.radiansToDegrees, arcDeg, 64)
                 shapeRenderer.color = voidColor
                 shapeRenderer.circle(wx, wy, c.innerRadius, 64)
-                // Cut the doorway: rect oriented radially at doorAngle
-                val rectW = RoomBuilder.WALL_T + 0.2f   // radial extent
-                val rectH = RoomBuilder.DOOR_W           // tangential extent
-                val dcx   = wx + MathUtils.cos(c.doorAngle) * (c.innerRadius + RoomBuilder.WALL_T / 2f)
-                val dcy   = wy + MathUtils.sin(c.doorAngle) * (c.innerRadius + RoomBuilder.WALL_T / 2f)
-                shapeRenderer.rect(
-                    dcx - rectW / 2f, dcy - rectH / 2f,
-                    rectW / 2f, rectH / 2f,
-                    rectW, rectH,
-                    1f, 1f,
-                    c.doorAngle * MathUtils.radiansToDegrees
-                )
             }
         }
 
@@ -455,6 +458,9 @@ class Main : ApplicationAdapter() {
                 }
             }
         }
+
+        // Spiders
+        spiders.forEach { it.draw(shapeRenderer) }
 
         // Player model
         drawPlayer(playerBody.position.x, playerBody.position.y)
@@ -653,6 +659,7 @@ class Main : ApplicationAdapter() {
         shapeRenderer.dispose()
         uiBatch.dispose()
         font.dispose()
+        spiders.forEach { it.dispose() }
         rayHandler.dispose()
         world.dispose()
     }

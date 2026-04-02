@@ -29,7 +29,7 @@ data class LootItem(val x: Float, val y: Float, val type: LootType, var collecte
 object RoomBuilder {
 
     const val WALL_T   = 0.5f
-    const val DOOR_W   = 1.8f
+    const val DOOR_W   = 2.5f
     const val CONN_LEN = 2f
 
     fun dimensions(type: RoomType, entry: WallSide): Pair<Float, Float> = when (type) {

@@ -126,10 +126,10 @@ object RoomManager {
         WallSide.BOTTOM -> WallSide.TOP
     }
 
-    private fun randomType(): RoomType = when (MathUtils.random(3)) {
-        0    -> RoomType.SQUARE
-        1    -> RoomType.CORRIDOR
-        2    -> RoomType.CIRCLE
+    private fun randomType(): RoomType = when (MathUtils.random(7)) {
+        0, 1 -> RoomType.SQUARE
+        2, 3 -> RoomType.CORRIDOR
+        4, 5 -> RoomType.CIRCLE
         else -> RoomType.LARGE
     }
 
