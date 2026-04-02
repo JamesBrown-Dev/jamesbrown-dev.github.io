@@ -126,10 +126,11 @@ object RoomManager {
         WallSide.BOTTOM -> WallSide.TOP
     }
 
-    private fun randomType(): RoomType = when (MathUtils.random(2)) {
+    private fun randomType(): RoomType = when (MathUtils.random(3)) {
         0    -> RoomType.SQUARE
         1    -> RoomType.CORRIDOR
-        else -> RoomType.CIRCLE
+        2    -> RoomType.CIRCLE
+        else -> RoomType.LARGE
     }
 
     private fun buildRoom(worldX: Float, worldY: Float, type: RoomType, entry: WallSide, exits: Set<WallSide>, depth: Int = 0): RoomData =
@@ -137,5 +138,6 @@ object RoomManager {
             RoomType.SQUARE   -> RoomBuilder.buildSquareRoom(worldX, worldY, entry, exits)
             RoomType.CORRIDOR -> RoomBuilder.buildCorridorRoom(worldX, worldY, entry, exits)
             RoomType.CIRCLE   -> RoomBuilder.buildCircleRoom(worldX, worldY, entry)
+            RoomType.LARGE    -> RoomBuilder.buildLargeRoom(worldX, worldY, entry, exits)
         }.copy(depth = depth)
 }

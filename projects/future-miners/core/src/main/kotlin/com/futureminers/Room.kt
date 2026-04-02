@@ -4,7 +4,7 @@ import com.badlogic.gdx.math.MathUtils
 
 data class WallSegment(val x: Float, val y: Float, val w: Float, val h: Float)
 
-enum class RoomType { SQUARE, CORRIDOR, CIRCLE }
+enum class RoomType { SQUARE, CORRIDOR, CIRCLE, LARGE }
 enum class WallSide { TOP, BOTTOM, LEFT, RIGHT }
 
 data class CircleWall(val cx: Float, val cy: Float, val innerRadius: Float, val doorAngle: Float)
@@ -39,6 +39,7 @@ object RoomBuilder {
             WallSide.TOP,  WallSide.BOTTOM -> Pair(3.5f, 8f)
         }
         RoomType.CIRCLE   -> Pair(9f, 9f)
+        RoomType.LARGE    -> Pair(14f, 14f)
     }
 
     fun buildStartRoom(roomW: Float, roomH: Float): RoomData {
@@ -61,6 +62,15 @@ object RoomBuilder {
 
     fun buildSquareRoom(worldX: Float, worldY: Float, entry: WallSide, exits: Set<WallSide> = emptySet()): RoomData =
         buildRectRoom(worldX, worldY, 8f, 8f, entry, RoomType.SQUARE, exits)
+
+    fun buildLargeRoom(worldX: Float, worldY: Float, entry: WallSide, exits: Set<WallSide> = emptySet()): RoomData {
+        val base = buildRectRoom(worldX, worldY, 14f, 14f, entry, RoomType.LARGE, exits)
+        val ox = base.bodyOffsetX
+        val oy = base.bodyOffsetY
+        // Solid 3×3 pillar centred in the room body
+        val pillar = WallSegment(ox + 3.5f, oy + 3.5f, 7f, 7f)
+        return base.copy(walls = base.walls + pillar)
+    }
 
     fun buildCorridorRoom(worldX: Float, worldY: Float, entry: WallSide, exits: Set<WallSide> = emptySet()): RoomData {
         val (w, h) = dimensions(RoomType.CORRIDOR, entry)
