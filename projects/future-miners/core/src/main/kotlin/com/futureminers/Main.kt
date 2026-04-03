@@ -89,7 +89,7 @@ class Main : ApplicationAdapter() {
         RayHandler.setGammaCorrection(true)
         RayHandler.useDiffuseLight(true)
         rayHandler = RayHandler(world)
-        rayHandler.setAmbientLight(0f, 0f, 0f, 0.03f)
+        rayHandler.setAmbientLight(1f, 1f, 1f, 1f) // TEST: full brightness
 
         // Music
         music = Gdx.audio.newMusic(Gdx.files.internal("dragon-studio-creepy-industrial-sounds-ambience.mp3"))

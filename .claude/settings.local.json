@@ -4,7 +4,14 @@
       "Bash(powershell -Command \"Remove-Item -Path ''c:\\\\Users\\\\james\\\\Documents\\\\Projects\\\\jamesbrown-dev.github.io\\\\projects\\\\future-miners'' -Recurse -Force\")",
       "Bash(java -version)",
       "Bash(powershell -Command \"Remove-Item -Path ''c:\\\\Users\\\\james\\\\Documents\\\\Projects\\\\jamesbrown-dev.github.io\\\\projects\\\\future-miners\\\\core\\\\src\\\\main\\\\java\\\\com\\\\futureminers\\\\Main.java'' -Force\")",
-      "Bash(find /c/Users/james/Documents/Projects/jamesbrown-dev.github.io/projects/future-miners -name *.gradle*)"
+      "Bash(find /c/Users/james/Documents/Projects/jamesbrown-dev.github.io/projects/future-miners -name *.gradle*)",
+      "Bash(./gradlew :lwjgl3:compileKotlin)",
+      "Bash(./gradlew :core:compileKotlin)",
+      "Bash(./gradlew :core:build)",
+      "Bash(cmd /c \"gradlew.bat :core:build\")",
+      "Bash(cmd /c \"gradlew.bat :core:compileKotlin 2>&1\")",
+      "Bash(cmd /c \"gradlew.bat :core:compileKotlin\")",
+      "Bash(echo \"EXIT: $?\")"
     ]
   }
 }

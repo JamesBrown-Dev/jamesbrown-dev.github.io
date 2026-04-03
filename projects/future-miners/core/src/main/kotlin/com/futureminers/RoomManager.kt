@@ -6,8 +6,11 @@ object RoomManager {
 
     val startW = 10f
     val startH = 7.5f
-    private const val MAX_DEPTH     = 8
-    private const val BRANCH_CHANCE = 0.80f
+    private const val MAX_DEPTH       = 8
+    private const val BRANCH_CHANCE   = 0.80f
+    private const val MAX_SHORTCUT_GAP = 8f    // max world-unit gap between facing wall outer faces
+    private const val SHORTCUT_CHANCE  = 0.50f // probability of adding a shortcut when eligible
+    private val MIN_OVERLAP = RoomBuilder.DOOR_W + RoomBuilder.WALL_T * 4f // min shared edge for a doorway
 
     fun generate(): List<RoomData> {
         val rooms    = mutableListOf<RoomData>()
@@ -23,7 +26,7 @@ object RoomManager {
 
         // Build start room with only the doorways that have real rooms behind them
         rooms += buildStartRoom(startW, startH, successfulExits)
-        return rooms
+        return addShortcuts(rooms)
     }
 
     /**
@@ -126,11 +129,12 @@ object RoomManager {
         WallSide.BOTTOM -> WallSide.TOP
     }
 
-    private fun randomType(): RoomType = when (MathUtils.random(7)) {
-        0, 1 -> RoomType.SQUARE
-        2, 3 -> RoomType.CORRIDOR
-        4, 5 -> RoomType.CIRCLE
-        else -> RoomType.LARGE
+    private fun randomType(): RoomType = when (MathUtils.random(8)) {
+        0, 1, 2 -> RoomType.SQUARE
+        3, 4    -> RoomType.CORRIDOR
+        5       -> RoomType.CIRCLE
+        6       -> RoomType.LARGE
+        else    -> RoomType.SQUARE
     }
 
     private fun buildRoom(worldX: Float, worldY: Float, type: RoomType, entry: WallSide, exits: Set<WallSide>, depth: Int = 0): RoomData =
@@ -140,4 +144,154 @@ object RoomManager {
             RoomType.CIRCLE   -> RoomBuilder.buildCircleRoom(worldX, worldY, entry)
             RoomType.LARGE    -> RoomBuilder.buildLargeRoom(worldX, worldY, entry, exits)
         }.copy(depth = depth)
+
+    // ── Shortcut corridor detection ───────────────────────────────────────────
+
+    /**
+     * Post-generation pass: find pairs of SQUARE/LARGE rooms whose facing walls are
+     * within [MAX_SHORTCUT_GAP] of each other with enough overlap, then punch a doorway
+     * in both walls and add connector side-wall segments to close the passage sides.
+     */
+    private fun addShortcuts(rooms: List<RoomData>): List<RoomData> {
+        val result     = rooms.toMutableList()
+        val connectors = mutableListOf<RoomData>()
+        val usedIdx    = mutableSetOf<Int>()   // result indices already given a shortcut
+
+        data class Bounds(val idx: Int, val x1: Float, val y1: Float, val x2: Float, val y2: Float)
+
+        // Only rect-style rooms that haven't already filled every side
+        val eligible = result.mapIndexedNotNull { i, r ->
+            if (r.type == RoomType.CIRCLE || r.type == RoomType.CORRIDOR) null
+            else {
+                val x1 = r.worldX + r.bodyOffsetX
+                val y1 = r.worldY + r.bodyOffsetY
+                Bounds(i, x1, y1, x1 + r.width, y1 + r.height)
+            }
+        }
+
+        val wallT  = RoomBuilder.WALL_T
+        val doorW  = RoomBuilder.DOOR_W
+        val margin = doorW / 2f + wallT
+
+        // Local helper — tries one orientation, returns true and records the shortcut on success
+        fun tryConnect(
+            a: Bounds, b: Bounds,
+            sideA: WallSide, sideB: WallSide,
+            gap: Float,
+            oLow: Float, oHigh: Float,       // overlap range along the shared axis (world coords)
+            isHorizontal: Boolean,            // true = left/right passage, false = up/down
+            connStartX: Float, connStartY: Float
+        ): Boolean {
+            if (gap !in 0f..MAX_SHORTCUT_GAP) return false
+            if (oHigh - oLow < MIN_OVERLAP) return false
+
+            val center = MathUtils.random(oLow + margin, oHigh - margin)
+            val lo = center - doorW / 2f
+            val hi = center + doorW / 2f
+
+            // Reject if any other room body (±stub margin) intersects the corridor rect
+            val corrX1 = if (isHorizontal) minOf(a.x2, b.x1) else lo - wallT
+            val corrY1 = if (isHorizontal) lo - wallT           else minOf(a.y2, b.y2)
+            val corrX2 = if (isHorizontal) maxOf(a.x2, b.x1) + gap else hi + wallT
+            val corrY2 = if (isHorizontal) hi + wallT              else maxOf(a.y2, b.y2) + gap
+            val stub   = RoomBuilder.CONN_LEN
+            val obstructed = eligible.any { c ->
+                c.idx != a.idx && c.idx != b.idx &&
+                corrX1 < c.x2 + stub && corrX2 > c.x1 - stub &&
+                corrY1 < c.y2 + stub && corrY2 > c.y1 - stub
+            }
+            if (obstructed) return false
+
+            val ra = result[a.idx]; val rb = result[b.idx]
+            val newRa = cutWall(ra, sideA, lo, hi) ?: return false
+            val newRb = cutWall(rb, sideB, lo, hi) ?: return false
+
+            result[a.idx] = newRa
+            result[b.idx] = newRb
+
+            if (gap > 0.05f) {
+                val walls = if (isHorizontal) listOf(
+                    WallSegment(connStartX, lo - wallT, gap, wallT),  // bottom side of passage
+                    WallSegment(connStartX, hi,         gap, wallT)   // top side of passage
+                ) else listOf(
+                    WallSegment(lo - wallT, connStartY, wallT, gap),  // left side of passage
+                    WallSegment(hi,         connStartY, wallT, gap)   // right side of passage
+                )
+                val connW = if (isHorizontal) gap  else doorW
+                val connH = if (isHorizontal) doorW else gap
+                connectors += RoomData(0f, 0f, connW, connH, RoomType.CORRIDOR, walls)
+            }
+
+            usedIdx += a.idx
+            usedIdx += b.idx
+            println("[Shortcut] ${sideA.name} of room ${a.idx} ↔ ${sideB.name} of room ${b.idx}, gap=${gap}, connector=${if (gap > 0.05f) "yes" else "none (flush)"}")
+            return true
+        }
+
+        for (ai in eligible.indices) {
+            for (bi in ai + 1 until eligible.size) {
+                val a = eligible[ai]; val b = eligible[bi]
+                if (a.idx in usedIdx || b.idx in usedIdx) continue
+                if (!MathUtils.randomBoolean(SHORTCUT_CHANCE)) continue
+
+                val oY1 = maxOf(a.y1, b.y1); val oY2 = minOf(a.y2, b.y2)
+                val oX1 = maxOf(a.x1, b.x1); val oX2 = minOf(a.x2, b.x2)
+
+                // RIGHT(A) ↔ LEFT(B) — B sits to the right of A
+                if (tryConnect(a, b, WallSide.RIGHT, WallSide.LEFT,  b.x1 - a.x2, oY1, oY2, true,  a.x2, 0f  )) continue
+                // LEFT(A) ↔ RIGHT(B) — B sits to the left of A
+                if (tryConnect(a, b, WallSide.LEFT,  WallSide.RIGHT, a.x1 - b.x2, oY1, oY2, true,  b.x2, 0f  )) continue
+                // TOP(A) ↔ BOTTOM(B) — B sits above A
+                if (tryConnect(a, b, WallSide.TOP,   WallSide.BOTTOM, b.y1 - a.y2, oX1, oX2, false, 0f,   a.y2)) continue
+                // BOTTOM(A) ↔ TOP(B) — B sits below A
+                if (tryConnect(a, b, WallSide.BOTTOM, WallSide.TOP,   a.y1 - b.y2, oX1, oX2, false, 0f,   b.y2)) continue
+            }
+        }
+
+        println("[Shortcuts] ${connectors.size} shortcut corridor(s) added this run (${usedIdx.size / 2} pairs)")
+        return result + connectors
+    }
+
+    /**
+     * Find the single solid wall segment on [side] of [room] and split it to leave a
+     * gap from [cutLow] to [cutHigh] (world coordinates along the split axis).
+     * Returns null if the expected solid segment is not found (already open / not rect).
+     */
+    private fun cutWall(room: RoomData, side: WallSide, cutLow: Float, cutHigh: Float): RoomData? {
+        val ox = room.bodyOffsetX; val oy = room.bodyOffsetY
+        val w  = room.width;       val h  = room.height
+        val wallT = RoomBuilder.WALL_T
+
+        val expX: Float; val expY: Float; val expW: Float; val expH: Float
+        when (side) {
+            WallSide.RIGHT  -> { expX = ox + w - wallT; expY = oy;             expW = wallT; expH = h     }
+            WallSide.LEFT   -> { expX = ox;             expY = oy;             expW = wallT; expH = h     }
+            WallSide.TOP    -> { expX = ox;             expY = oy + h - wallT; expW = w;     expH = wallT }
+            WallSide.BOTTOM -> { expX = ox;             expY = oy;             expW = w;     expH = wallT }
+        }
+
+        val seg = room.walls.find {
+            Math.abs(it.x - expX) < 0.05f && Math.abs(it.y - expY) < 0.05f &&
+            Math.abs(it.w - expW) < 0.05f && Math.abs(it.h - expH) < 0.05f
+        } ?: return null
+
+        val newWalls = room.walls.toMutableList()
+        newWalls.remove(seg)
+
+        if (side == WallSide.LEFT || side == WallSide.RIGHT) {
+            // Vertical wall — split in Y (cutLow/cutHigh are world Y)
+            val lo = cutLow  - room.worldY
+            val hi = cutHigh - room.worldY
+            if (lo - seg.y         > 0.05f) newWalls += WallSegment(seg.x, seg.y, seg.w, lo - seg.y)
+            if (seg.y + seg.h - hi > 0.05f) newWalls += WallSegment(seg.x, hi,    seg.w, seg.y + seg.h - hi)
+        } else {
+            // Horizontal wall — split in X (cutLow/cutHigh are world X)
+            val lo = cutLow  - room.worldX
+            val hi = cutHigh - room.worldX
+            if (lo - seg.x         > 0.05f) newWalls += WallSegment(seg.x, seg.y, lo - seg.x, seg.h)
+            if (seg.x + seg.w - hi > 0.05f) newWalls += WallSegment(hi,    seg.y, seg.x + seg.w - hi, seg.h)
+        }
+
+        return room.copy(walls = newWalls, openSides = room.openSides + side)
+    }
 }
