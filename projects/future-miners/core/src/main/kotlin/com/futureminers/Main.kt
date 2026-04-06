@@ -51,7 +51,9 @@ class Main : ApplicationAdapter() {
     private lateinit var music: Music
     private lateinit var rooms: List<RoomData>
 
-    private val lootItems = mutableListOf<LootItem>()
+    private val lootItems    = mutableListOf<LootItem>()
+    private data class DroppedItem(val x: Float, val y: Float, val type: ItemType, var pickedUp: Boolean = false, var cooldown: Float = 0.5f)
+    private val droppedItems = mutableListOf<DroppedItem>()
     private lateinit var uiBatch: SpriteBatch
     private lateinit var font: BitmapFont
     private lateinit var uiCamera: OrthographicCamera
@@ -61,10 +63,11 @@ class Main : ApplicationAdapter() {
     }
     private val INV_SIZE  = 4
     private val inventory = arrayOfNulls<ItemType>(INV_SIZE)  // slot 0 = torch, rest nullable
-    private var selectedSlot  = 0
+    private var selectedSlot    = 0
     private var activeLightSlot = 0  // slot index of active light; -1 = none
-    private val SLOT_PX  = 72f
-    private val SLOT_GAP = 8f
+    private val SLOT_PX    = 72f
+    private val SLOT_GAP   = 8f
+    private val DROP_BTN_R = 36f   // radius of the drop/pickup buttons in screen pixels
 
     private lateinit var candlePlayerLight: PointLight
 
@@ -89,7 +92,7 @@ class Main : ApplicationAdapter() {
         RayHandler.setGammaCorrection(true)
         RayHandler.useDiffuseLight(true)
         rayHandler = RayHandler(world)
-        rayHandler.setAmbientLight(1f, 1f, 1f, 1f) // TEST: full brightness
+        rayHandler.setAmbientLight(0f, 0f, 0f, 0.03f)
 
         // Music
         music = Gdx.audio.newMusic(Gdx.files.internal("dragon-studio-creepy-industrial-sounds-ambience.mp3"))
@@ -302,23 +305,11 @@ class Main : ApplicationAdapter() {
         // Spider update
         spiders.forEach { it.update(dt, playerBody.position) }
 
-        // Loot pickup
         val px = playerBody.position.x
         val py = playerBody.position.y
-        lootItems.filter { !it.collected }.forEach { loot ->
-            val dx = loot.x - px
-            val dy = loot.y - py
-            val emptySlot = (1 until INV_SIZE).firstOrNull { inventory[it] == null }
-            if (dx * dx + dy * dy < 0.4f * 0.4f && emptySlot != null) {
-                loot.collected = true
-                val itemType = when (loot.type) {
-                    LootType.SILVER  -> ItemType.SILVER
-                    LootType.GOLD    -> ItemType.GOLD
-                    LootType.DIAMOND -> ItemType.DIAMOND
-                }
-                inventory[emptySlot] = itemType
-            }
-        }
+
+        // Tick drop cooldowns
+        droppedItems.filter { !it.pickedUp }.forEach { it.cooldown -= dt }
 
         // Inventory touch input
         if (Gdx.input.justTouched()) {
@@ -327,13 +318,57 @@ class Main : ApplicationAdapter() {
             val totalW = INV_SIZE * SLOT_PX + (INV_SIZE - 1) * SLOT_GAP
             val barX = (Gdx.graphics.width - totalW) / 2f
             val barY = 12f
-            for (i in 0 until INV_SIZE) {
-                val sx = barX + i * (SLOT_PX + SLOT_GAP)
-                if (tx >= sx && tx <= sx + SLOT_PX && ty >= barY && ty <= barY + SLOT_PX) {
-                    val item = inventory[i]
-                    if (item != null && item.isLight)
-                        activeLightSlot = if (activeLightSlot == i) -1 else i
-                    selectedSlot = i
+
+            val dropBtnCx  = DROP_BTN_R + 12f
+            val dropBtnCy  = DROP_BTN_R + 12f
+            val pickBtnCx  = dropBtnCx + DROP_BTN_R * 2f + 10f
+            val pickBtnCy  = dropBtnCy
+            val pickupRange = 1.2f
+
+            // Drop button (bottom-left)
+            val ddx = tx - dropBtnCx; val ddy = ty - dropBtnCy
+            if (ddx * ddx + ddy * ddy <= DROP_BTN_R * DROP_BTN_R && inventory[selectedSlot] != null) {
+                val item = inventory[selectedSlot]!!
+                inventory[selectedSlot] = null
+                if (activeLightSlot == selectedSlot) activeLightSlot = -1
+                droppedItems += DroppedItem(playerBody.position.x, playerBody.position.y, item)
+            }
+            // Pickup button (bottom-left, right of drop)
+            else {
+                val pdx = tx - pickBtnCx; val pdy = ty - pickBtnCy
+                if (pdx * pdx + pdy * pdy <= DROP_BTN_R * DROP_BTN_R) {
+                    val freeSlot = (0 until INV_SIZE).firstOrNull { inventory[it] == null }
+                    if (freeSlot != null) {
+                        // Try dropped items first (with cooldown elapsed)
+                        val nearDropped = droppedItems.filter { !it.pickedUp && it.cooldown <= 0f }
+                            .minByOrNull { (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) }
+                            ?.takeIf { (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) < pickupRange * pickupRange }
+                        val nearLoot = lootItems.filter { !it.collected }
+                            .minByOrNull { (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) }
+                            ?.takeIf { (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) < pickupRange * pickupRange }
+
+                        if (nearDropped != null) {
+                            inventory[freeSlot] = nearDropped.type
+                            nearDropped.pickedUp = true
+                        } else if (nearLoot != null) {
+                            inventory[freeSlot] = when (nearLoot.type) {
+                                LootType.SILVER  -> ItemType.SILVER
+                                LootType.GOLD    -> ItemType.GOLD
+                                LootType.DIAMOND -> ItemType.DIAMOND
+                            }
+                            nearLoot.collected = true
+                        }
+                    }
+                } else {
+                    for (i in 0 until INV_SIZE) {
+                        val sx = barX + i * (SLOT_PX + SLOT_GAP)
+                        if (tx >= sx && tx <= sx + SLOT_PX && ty >= barY && ty <= barY + SLOT_PX) {
+                            val item = inventory[i]
+                            if (item != null && item.isLight)
+                                activeLightSlot = if (activeLightSlot == i) -1 else i
+                            selectedSlot = i
+                        }
+                    }
                 }
             }
         }
@@ -459,6 +494,45 @@ class Main : ApplicationAdapter() {
             }
         }
 
+        // Dropped items (world space)
+        droppedItems.filter { !it.pickedUp }.forEach { d ->
+            val lx = d.x; val ly = d.y
+            when (d.type) {
+                ItemType.TORCH -> {
+                    shapeRenderer.color = Color(0.30f, 0.20f, 0.10f, 1f)
+                    shapeRenderer.rect(lx - 0.04f, ly - 0.18f, 0.08f, 0.22f)
+                    shapeRenderer.color = Color(1f, 0.45f, 0.1f, 1f)
+                    shapeRenderer.circle(lx, ly + 0.10f, 0.07f, 10)
+                }
+                ItemType.CANDLE -> {
+                    shapeRenderer.color = Color(0.9f, 0.88f, 0.82f, 1f)
+                    shapeRenderer.rect(lx - 0.05f, ly - 0.12f, 0.10f, 0.16f)
+                    shapeRenderer.color = Color(1f, 0.45f, 0.1f, 1f)
+                    shapeRenderer.circle(lx, ly + 0.08f, 0.06f, 10)
+                }
+                ItemType.SILVER -> {
+                    shapeRenderer.color = Color(0.35f, 0.35f, 0.40f, 1f); shapeRenderer.circle(lx, ly, 0.20f, 20)
+                    shapeRenderer.color = Color(0.72f, 0.72f, 0.80f, 1f); shapeRenderer.circle(lx, ly, 0.17f, 20)
+                    shapeRenderer.color = Color(0.88f, 0.88f, 0.95f, 1f); shapeRenderer.circle(lx, ly, 0.09f, 16)
+                    shapeRenderer.color = Color(1f, 1f, 1f, 1f);          shapeRenderer.circle(lx - 0.06f, ly + 0.07f, 0.03f, 8)
+                }
+                ItemType.GOLD -> {
+                    shapeRenderer.color = Color(0.40f, 0.20f, 0.01f, 1f); shapeRenderer.circle(lx, ly, 0.20f, 20)
+                    shapeRenderer.color = Color(0.95f, 0.70f, 0.08f, 1f); shapeRenderer.circle(lx, ly, 0.17f, 20)
+                    shapeRenderer.color = Color(1f, 0.90f, 0.40f, 1f);    shapeRenderer.circle(lx, ly, 0.09f, 16)
+                    shapeRenderer.color = Color(1f, 1f, 0.85f, 1f);       shapeRenderer.circle(lx - 0.06f, ly + 0.07f, 0.03f, 8)
+                }
+                ItemType.DIAMOND -> {
+                    val o = 0.13f
+                    shapeRenderer.color = Color(0.05f, 0.35f, 0.50f, 1f)
+                    shapeRenderer.rect(lx - o - 0.02f, ly - o - 0.02f, o + 0.02f, o + 0.02f, (o + 0.02f) * 2f, (o + 0.02f) * 2f, 1f, 1f, 45f)
+                    shapeRenderer.color = Color(0.35f, 0.88f, 1f, 1f)
+                    shapeRenderer.rect(lx - o, ly - o, o, o, o * 2f, o * 2f, 1f, 1f, 45f)
+                    shapeRenderer.color = Color(1f, 1f, 1f, 1f); shapeRenderer.circle(lx - 0.04f, ly + 0.04f, 0.025f, 6)
+                }
+            }
+        }
+
         // Spiders
         spiders.forEach { it.draw(shapeRenderer) }
 
@@ -580,6 +654,40 @@ class Main : ApplicationAdapter() {
                 null -> {}
             }
         }
+
+        val dropBtnCx  = DROP_BTN_R + 12f
+        val dropBtnCy  = DROP_BTN_R + 12f
+        val pickBtnCx  = dropBtnCx + DROP_BTN_R * 2f + 10f
+        val pickBtnCy  = dropBtnCy
+        val pickupRange = 1.2f
+
+        // Drop button (bottom-left) — dimmed when nothing to drop
+        val hasItem = inventory[selectedSlot] != null
+        shapeRenderer.color = if (hasItem) Color(0.65f, 0.12f, 0.08f, 0.95f) else Color(0.20f, 0.10f, 0.10f, 0.60f)
+        shapeRenderer.circle(dropBtnCx, dropBtnCy, DROP_BTN_R, 20)
+        val arm = DROP_BTN_R * 0.42f
+        shapeRenderer.color = if (hasItem) Color(1f, 1f, 1f, 1f) else Color(0.5f, 0.4f, 0.4f, 0.6f)
+        shapeRenderer.rectLine(dropBtnCx - arm, dropBtnCy - arm, dropBtnCx + arm, dropBtnCy + arm, 2.5f)
+        shapeRenderer.rectLine(dropBtnCx + arm, dropBtnCy - arm, dropBtnCx - arm, dropBtnCy + arm, 2.5f)
+
+        // Pickup button — lit when a pickable item is nearby and inventory has space
+        val hasFreeSlot = (0 until INV_SIZE).any { inventory[it] == null }
+        val nearbyPickup = hasFreeSlot && (
+            droppedItems.any { !it.pickedUp && it.cooldown <= 0f && (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) < pickupRange * pickupRange } ||
+            lootItems.any   { !it.collected && (it.x - px) * (it.x - px) + (it.y - py) * (it.y - py) < pickupRange * pickupRange }
+        )
+        shapeRenderer.color = if (nearbyPickup) Color(0.15f, 0.55f, 0.20f, 0.95f) else Color(0.10f, 0.20f, 0.12f, 0.60f)
+        shapeRenderer.circle(pickBtnCx, pickBtnCy, DROP_BTN_R, 20)
+        // Up-arrow icon
+        val ar = DROP_BTN_R * 0.45f
+        shapeRenderer.color = if (nearbyPickup) Color(1f, 1f, 1f, 1f) else Color(0.4f, 0.5f, 0.4f, 0.6f)
+        shapeRenderer.triangle(
+            pickBtnCx,       pickBtnCy + ar,
+            pickBtnCx - ar,  pickBtnCy - ar * 0.4f,
+            pickBtnCx + ar,  pickBtnCy - ar * 0.4f
+        )
+        shapeRenderer.rect(pickBtnCx - ar * 0.28f, pickBtnCy - ar, ar * 0.56f, ar * 0.7f)
+
         shapeRenderer.end()
 
     }

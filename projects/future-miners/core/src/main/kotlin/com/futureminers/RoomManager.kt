@@ -171,7 +171,7 @@ object RoomManager {
 
         val wallT  = RoomBuilder.WALL_T
         val doorW  = RoomBuilder.DOOR_W
-        val margin = doorW / 2f + wallT
+        val margin = doorW / 2f + wallT * 2f
 
         // Local helper — tries one orientation, returns true and records the shortcut on success
         fun tryConnect(
