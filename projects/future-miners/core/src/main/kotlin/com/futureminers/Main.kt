@@ -107,11 +107,12 @@ class Main : ApplicationAdapter() {
                 createWall(room.worldX + seg.x, room.worldY + seg.y, seg.w, seg.h)
             }
             room.circle?.let { createCircleWall(room.worldX, room.worldY, it) }
+            room.bend?.let   { createBendWall(room.worldX, room.worldY, it) }
         }
 
         // Loot — 30% chance per non-start room; position random inside room bounds (inset from walls)
         val inset = RoomBuilder.WALL_T + 0.4f
-        rooms.filter { it.depth > 0 && MathUtils.randomBoolean(0.30f) }.forEach { room ->
+        rooms.filter { it.depth > 0 && it.type != RoomType.BEND && it.type != RoomType.CORRIDOR && MathUtils.randomBoolean(0.30f) }.forEach { room ->
             val lx = room.worldX + MathUtils.random(inset, room.width  - inset)
             val ly = room.worldY + MathUtils.random(inset, room.height - inset)
             val type = when {
@@ -125,7 +126,7 @@ class Main : ApplicationAdapter() {
         // Wall torches — each solid wall has a 10% chance; never on doorway sides
         val wallT = RoomBuilder.WALL_T
         val armLen = 0.35f
-        rooms.filter { it.depth > 0 && it.type != RoomType.CORRIDOR }.forEach { room ->
+        rooms.filter { it.depth > 0 && it.type != RoomType.CORRIDOR && it.type != RoomType.BEND }.forEach { room ->
             val bx = room.worldX + room.bodyOffsetX
             val by = room.worldY + room.bodyOffsetY
             for (side in WallSide.entries) {
@@ -159,7 +160,7 @@ class Main : ApplicationAdapter() {
         }
 
         // Spiders
-        rooms.filter { it.depth >= 3 && it.type != RoomType.CORRIDOR }
+        rooms.filter { it.depth >= 3 && it.type != RoomType.CORRIDOR && it.type != RoomType.BEND }
             .forEach { room -> if (MathUtils.randomBoolean(0.6f)) spiders += Spider(world, rayHandler, room) }
 
         // Player
@@ -217,6 +218,30 @@ class Main : ApplicationAdapter() {
             val a = startAngle + arcLen * i.toFloat() / segCount
             verts[i * 2]     = worldX + c.cx + c.innerRadius * MathUtils.cos(a)
             verts[i * 2 + 1] = worldY + c.cy + c.innerRadius * MathUtils.sin(a)
+        }
+        val chain = ChainShape()
+        chain.createChain(verts)
+        body.createFixture(chain, 0f).also {
+            it.filterData = Filter().apply { categoryBits = 0x0001 }
+        }
+        chain.dispose()
+    }
+
+    private fun createBendWall(worldX: Float, worldY: Float, b: BendData) {
+        createArcChain(worldX + b.cx, worldY + b.cy, b.innerRadius, b.startAngleDeg, b.sweepDeg)
+        createArcChain(worldX + b.cx, worldY + b.cy, b.outerRadius, b.startAngleDeg, b.sweepDeg)
+    }
+
+    private fun createArcChain(cx: Float, cy: Float, radius: Float, startDeg: Float, sweepDeg: Float) {
+        val body = world.createBody(BodyDef().apply { type = BodyDef.BodyType.StaticBody })
+        val segCount = 20
+        val startRad = startDeg * MathUtils.degreesToRadians
+        val sweepRad = sweepDeg * MathUtils.degreesToRadians
+        val verts = FloatArray((segCount + 1) * 2)
+        for (i in 0..segCount) {
+            val a = startRad + sweepRad * i.toFloat() / segCount
+            verts[i * 2]     = cx + radius * MathUtils.cos(a)
+            verts[i * 2 + 1] = cy + radius * MathUtils.sin(a)
         }
         val chain = ChainShape()
         chain.createChain(verts)
@@ -403,6 +428,17 @@ class Main : ApplicationAdapter() {
                 shapeRenderer.arc(wx, wy, outerR, startRad * MathUtils.radiansToDegrees, arcDeg, 64)
                 shapeRenderer.color = voidColor
                 shapeRenderer.circle(wx, wy, c.innerRadius, 64)
+            }
+            // Bend rooms: 3-layer arc draw — outer wall, restore corridor, fill inner corner
+            room.bend?.let { b ->
+                val wx = room.worldX + b.cx
+                val wy = room.worldY + b.cy
+                shapeRenderer.color = wallColor
+                shapeRenderer.arc(wx, wy, b.outerRadius + RoomBuilder.WALL_T, b.startAngleDeg, b.sweepDeg, 32)
+                shapeRenderer.color = voidColor
+                shapeRenderer.arc(wx, wy, b.outerRadius, b.startAngleDeg, b.sweepDeg, 32)
+                shapeRenderer.color = wallColor
+                shapeRenderer.arc(wx, wy, b.innerRadius, b.startAngleDeg, b.sweepDeg, 32)
             }
         }
 

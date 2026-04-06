@@ -4,10 +4,21 @@ import com.badlogic.gdx.math.MathUtils
 
 data class WallSegment(val x: Float, val y: Float, val w: Float, val h: Float)
 
-enum class RoomType { SQUARE, CORRIDOR, CIRCLE, LARGE }
+enum class RoomType { SQUARE, CORRIDOR, CIRCLE, LARGE, BEND }
 enum class WallSide { TOP, BOTTOM, LEFT, RIGHT }
 
 data class CircleWall(val cx: Float, val cy: Float, val innerRadius: Float, val doorAngle: Float)
+
+/** Quarter-circle (90°) corridor bend.  [cx,cy] is the centre of curvature in room-local coords.
+ *  [startAngleDeg] + 90° sweep (CCW) traces from the entry opening to the exit opening. */
+data class BendData(
+    val cx: Float,
+    val cy: Float,
+    val innerRadius: Float,   // inner corridor wall
+    val outerRadius: Float,   // outer corridor wall
+    val startAngleDeg: Float, // libGDX arc start angle (CCW), sweep is always 90°
+    val sweepDeg: Float = 90f
+)
 
 data class RoomData(
     val worldX: Float,
@@ -17,6 +28,7 @@ data class RoomData(
     val type: RoomType,
     val walls: List<WallSegment>,
     val circle: CircleWall? = null,
+    val bend: BendData? = null,
     val depth: Int = 0,
     val bodyOffsetX: Float = 0f,
     val bodyOffsetY: Float = 0f,
@@ -32,6 +44,8 @@ object RoomBuilder {
     const val DOOR_W   = 2.5f
     const val CONN_LEN = 2f
 
+    const val BEND_S = 7f   // side length of the square bounding box for a bend room
+
     fun dimensions(type: RoomType, entry: WallSide): Pair<Float, Float> = when (type) {
         RoomType.SQUARE   -> Pair(8f, 8f)
         RoomType.CORRIDOR -> when (entry) {
@@ -40,6 +54,7 @@ object RoomBuilder {
         }
         RoomType.CIRCLE   -> Pair(9f, 9f)
         RoomType.LARGE    -> Pair(14f, 14f)
+        RoomType.BEND     -> Pair(BEND_S, BEND_S)
     }
 
     fun buildStartRoom(roomW: Float, roomH: Float): RoomData {
@@ -125,6 +140,72 @@ object RoomBuilder {
 
         return RoomData(worldX, worldY, roomSize, roomSize, RoomType.CIRCLE, walls,
             CircleWall(cx, cy, radius, doorAngle))
+    }
+
+    /**
+     * Build a quarter-circle bend corridor.  [entry] and [exit] must be perpendicular.
+     * The room is a BEND_S × BEND_S square; the arc is centred at whichever corner
+     * corresponds to the turn direction so the openings are centred on their walls.
+     */
+    fun buildBendRoom(worldX: Float, worldY: Float, entry: WallSide, exit: WallSide): RoomData {
+        val S    = BEND_S
+        val half = DOOR_W / 2f
+        val r    = S / 2f        // centerline radius
+        val rIn  = r - half      // inner wall of corridor
+        val rOut = r + half      // outer wall of corridor
+        val walls = mutableListOf<WallSegment>()
+
+        // Choose corner (arc centre) and libGDX arc start angle (90° CCW sweep)
+        val isLT = (entry == WallSide.LEFT  && exit == WallSide.TOP)    || (entry == WallSide.TOP    && exit == WallSide.LEFT)
+        val isLB = (entry == WallSide.LEFT  && exit == WallSide.BOTTOM) || (entry == WallSide.BOTTOM && exit == WallSide.LEFT)
+        val isRT = (entry == WallSide.RIGHT && exit == WallSide.TOP)    || (entry == WallSide.TOP    && exit == WallSide.RIGHT)
+        // else RIGHT+BOTTOM
+
+        val (cx, cy, startDeg) = when {
+            isLT -> Triple(0f, S, 270f)
+            isLB -> Triple(0f, 0f, 0f)
+            isRT -> Triple(S, S, 180f)
+            else -> Triple(S, 0f, 90f)
+        }
+
+        when {
+            isLT -> { // arc centre = top-left; entry=left wall, exit=top wall
+                walls += WallSegment(0f,         0f,         S,        WALL_T)   // bottom full
+                walls += WallSegment(S - WALL_T, 0f,         WALL_T,   S)        // right full
+                walls += WallSegment(0f,         0f,         WALL_T,   r - half) // left below entry
+                walls += WallSegment(0f,         r + half,   WALL_T,   r - half) // left above entry (inner corner)
+                walls += WallSegment(0f,         S - WALL_T, r - half, WALL_T)   // top left cap (inner corner)
+                walls += WallSegment(r + half,   S - WALL_T, r - half, WALL_T)   // top right of exit
+            }
+            isLB -> { // arc centre = bottom-left; entry=left wall, exit=bottom wall
+                walls += WallSegment(0f,         S - WALL_T, S,        WALL_T)   // top full
+                walls += WallSegment(S - WALL_T, 0f,         WALL_T,   S)        // right full
+                walls += WallSegment(0f,         r + half,   WALL_T,   r - half) // left above entry
+                walls += WallSegment(0f,         0f,         WALL_T,   r - half) // left below entry (inner corner)
+                walls += WallSegment(0f,         0f,         r - half, WALL_T)   // bottom left cap (inner corner)
+                walls += WallSegment(r + half,   0f,         r - half, WALL_T)   // bottom right of exit
+            }
+            isRT -> { // arc centre = top-right; entry=right wall, exit=top wall
+                walls += WallSegment(0f,         0f,         S,        WALL_T)   // bottom full
+                walls += WallSegment(0f,         0f,         WALL_T,   S)        // left full
+                walls += WallSegment(S - WALL_T, 0f,         WALL_T,   r - half) // right below entry
+                walls += WallSegment(S - WALL_T, r + half,   WALL_T,   r - half) // right above entry (inner corner)
+                walls += WallSegment(r + half,   S - WALL_T, r - half, WALL_T)   // top right cap (inner corner)
+                walls += WallSegment(0f,         S - WALL_T, r - half, WALL_T)   // top left of exit
+            }
+            else -> { // arc centre = bottom-right; entry=right wall, exit=bottom wall
+                walls += WallSegment(0f,         S - WALL_T, S,        WALL_T)   // top full
+                walls += WallSegment(0f,         0f,         WALL_T,   S)        // left full
+                walls += WallSegment(S - WALL_T, r + half,   WALL_T,   r - half) // right above entry
+                walls += WallSegment(S - WALL_T, 0f,         WALL_T,   r - half) // right below entry (inner corner)
+                walls += WallSegment(r + half,   0f,         r - half, WALL_T)   // bottom right cap (inner corner)
+                walls += WallSegment(0f,         0f,         r - half, WALL_T)   // bottom left of exit
+            }
+        }
+
+        val bend = BendData(cx, cy, rIn, rOut, startDeg)
+        return RoomData(worldX, worldY, S, S, RoomType.BEND, walls, bend = bend,
+            openSides = setOf(entry, exit))
     }
 
     private fun buildRectRoom(

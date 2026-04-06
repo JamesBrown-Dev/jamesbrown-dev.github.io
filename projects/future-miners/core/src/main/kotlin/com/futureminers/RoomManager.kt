@@ -48,8 +48,8 @@ object RoomManager {
         val nextType  = randomType()
         val (nextW, nextH) = RoomBuilder.dimensions(nextType, nextEntry)
 
-        // Corridor rooms have no stub so they sit flush with no gap
-        val sl = if (nextType == RoomType.CORRIDOR) 0f else conn
+        // Corridor and bend rooms have no stub — sit flush against the parent wall
+        val sl = if (nextType == RoomType.CORRIDOR || nextType == RoomType.BEND) 0f else conn
 
         val nextWorldX: Float
         val nextWorldY: Float
@@ -60,8 +60,9 @@ object RoomManager {
             WallSide.BOTTOM -> { nextWorldX = bodyX + bodyW / 2f - nextW / 2f; nextWorldY = bodyY - nextH - sl }
         }
 
-        val nextOx = if (nextEntry == WallSide.LEFT   && nextType != RoomType.CORRIDOR) conn else 0f
-        val nextOy = if (nextEntry == WallSide.BOTTOM && nextType != RoomType.CORRIDOR) conn else 0f
+        val noStub = nextType == RoomType.CORRIDOR || nextType == RoomType.BEND
+        val nextOx = if (nextEntry == WallSide.LEFT   && !noStub) conn else 0f
+        val nextOy = if (nextEntry == WallSide.BOTTOM && !noStub) conn else 0f
         val candidate = Rect(nextWorldX + nextOx, nextWorldY + nextOy, nextW, nextH)
 
         if (occupied.any { it.overlaps(candidate) }) return false
@@ -69,10 +70,31 @@ object RoomManager {
 
         // Spawn children first — only exits with successful placements become doorways
         val successfulExits = mutableSetOf<WallSide>()
-        if (nextType != RoomType.CIRCLE) {
-            for (nextExit in rollExits(skip = nextEntry, depth = depth)) {
-                if (spawnNeighbour(rooms, occupied, candidate.x, candidate.y, nextW, nextH, nextExit, depth - 1)) {
-                    successfulExits += nextExit
+        when (nextType) {
+            RoomType.BEND -> {
+                // Bend must connect to exactly one perpendicular exit — abandon if neither fits
+                val perps = perpendiculars(nextEntry)
+                val first  = if (MathUtils.randomBoolean()) perps[0] else perps[1]
+                val second = if (first == perps[0]) perps[1] else perps[0]
+                var placed = false
+                for (bendExit in listOf(first, second)) {
+                    if (spawnNeighbour(rooms, occupied, candidate.x, candidate.y, nextW, nextH, bendExit, depth - 1)) {
+                        successfulExits += bendExit
+                        placed = true
+                        break
+                    }
+                }
+                if (!placed) {
+                    occupied.remove(candidate)
+                    return false
+                }
+            }
+            RoomType.CIRCLE -> { /* no exits */ }
+            else -> {
+                for (nextExit in rollExits(skip = nextEntry, depth = depth)) {
+                    if (spawnNeighbour(rooms, occupied, candidate.x, candidate.y, nextW, nextH, nextExit, depth - 1)) {
+                        successfulExits += nextExit
+                    }
                 }
             }
         }
@@ -129,12 +151,18 @@ object RoomManager {
         WallSide.BOTTOM -> WallSide.TOP
     }
 
-    private fun randomType(): RoomType = when (MathUtils.random(8)) {
+    private fun randomType(): RoomType = when (MathUtils.random(9)) {
         0, 1, 2 -> RoomType.SQUARE
         3, 4    -> RoomType.CORRIDOR
         5       -> RoomType.CIRCLE
         6       -> RoomType.LARGE
+        7       -> RoomType.BEND
         else    -> RoomType.SQUARE
+    }
+
+    private fun perpendiculars(side: WallSide): List<WallSide> = when (side) {
+        WallSide.LEFT, WallSide.RIGHT  -> listOf(WallSide.TOP, WallSide.BOTTOM)
+        WallSide.TOP,  WallSide.BOTTOM -> listOf(WallSide.LEFT, WallSide.RIGHT)
     }
 
     private fun buildRoom(worldX: Float, worldY: Float, type: RoomType, entry: WallSide, exits: Set<WallSide>, depth: Int = 0): RoomData =
@@ -143,6 +171,7 @@ object RoomManager {
             RoomType.CORRIDOR -> RoomBuilder.buildCorridorRoom(worldX, worldY, entry, exits)
             RoomType.CIRCLE   -> RoomBuilder.buildCircleRoom(worldX, worldY, entry)
             RoomType.LARGE    -> RoomBuilder.buildLargeRoom(worldX, worldY, entry, exits)
+            RoomType.BEND     -> RoomBuilder.buildBendRoom(worldX, worldY, entry, exits.first())
         }.copy(depth = depth)
 
     // ── Shortcut corridor detection ───────────────────────────────────────────
@@ -161,7 +190,7 @@ object RoomManager {
 
         // Only rect-style rooms that haven't already filled every side
         val eligible = result.mapIndexedNotNull { i, r ->
-            if (r.type == RoomType.CIRCLE || r.type == RoomType.CORRIDOR) null
+            if (r.type == RoomType.CIRCLE || r.type == RoomType.CORRIDOR || r.type == RoomType.BEND) null
             else {
                 val x1 = r.worldX + r.bodyOffsetX
                 val y1 = r.worldY + r.bodyOffsetY
